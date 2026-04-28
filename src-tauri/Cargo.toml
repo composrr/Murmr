@@ -26,7 +26,7 @@ tauri-build = { version = "2", features = [] }
 # `devtools` enables Ctrl+Shift+I in release builds. Useful while we're
 # beta-testing — a future v1.0 should drop this so end users can't crack
 # open the JS console.
-tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
@@ -101,3 +101,15 @@ windows = { version = "0.62", features = [
 # every Mac since 2012 has Metal.
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "openmp", "metal"] }
+# Used by focus/macos.rs to query the AXUIElement of the focused text field
+# and the main NSScreen's backingScaleFactor for points→pixels conversion.
+core-foundation = "0.10"
+core-graphics = "0.24"
+objc2 = "0.6"
+
+# Local patch: rdev 0.5.3 calls TSMGetInputSourceProperty inside its
+# CGEventTap callback (on a non-main thread). On macOS 26+, dispatch_assert_queue
+# crashes the app on the first key event. Vendored copy nulls out
+# create_string_for_key in that path; Murmr only reads `event_type`, never `name`.
+[patch.crates-io]
+rdev = { path = "../vendor-rdev" }

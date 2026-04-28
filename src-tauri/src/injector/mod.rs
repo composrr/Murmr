@@ -41,7 +41,15 @@ pub fn inject_text(text: &str) -> Result<(), String> {
     enigo
         .key(MOD_KEY, Press)
         .map_err(|e| format!("enigo Ctrl down: {e}"))?;
-    let v_result = enigo.key(Key::Unicode('v'), enigo::Direction::Click);
+    // macOS 26 crashes on Key::Unicode: enigo's char→keycode translation calls
+    // TISGetInputSourceProperty off the main thread; dispatch_assert_queue
+    // fatally aborts. Key::Other passes raw keycode to CGEventCreateKeyboardEvent
+    // with no TSM lookup. V on macOS HID keymap is 9.
+    #[cfg(target_os = "macos")]
+    let v_key = Key::Other(9);
+    #[cfg(not(target_os = "macos"))]
+    let v_key = Key::Unicode('v');
+    let v_result = enigo.key(v_key, enigo::Direction::Click);
     let _ = enigo.key(MOD_KEY, Release);
     v_result.map_err(|e| format!("enigo V: {e}"))?;
 

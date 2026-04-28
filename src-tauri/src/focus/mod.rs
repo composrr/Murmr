@@ -1,9 +1,10 @@
 //! Detect what's focused on the user's desktop so we can position the HUD
-//! intelligently. Win32 today; macOS (AXUIElement) lands when we get to a
-//! Mac build.
+//! intelligently. Win32 UIA on Windows; AXUIElement on macOS.
 
 #[cfg(windows)]
 mod windows;
+#[cfg(target_os = "macos")]
+mod macos;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenRect {
@@ -21,7 +22,12 @@ pub fn uia_focused_element_rect() -> Option<ScreenRect> {
     windows::uia_focused_element_rect()
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn uia_focused_element_rect() -> Option<ScreenRect> {
+    macos::ax_focused_element_rect()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn uia_focused_element_rect() -> Option<ScreenRect> {
     None
 }
