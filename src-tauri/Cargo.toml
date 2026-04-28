@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.10"
+version = "0.1.11"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"
@@ -100,4 +100,9 @@ windows = { version = "0.62", features = [
 # automatically — works on Intel Macs too (with a smaller speedup) since
 # every Mac since 2012 has Metal.
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "openmp", "metal"] }
+# Mac uses Metal for the heavy lifting (encoder/decoder on the GPU). OpenMP
+# would just be a CPU fallback path — and bundling libomp on macOS is a
+# headache (it's not in the SDK; you'd need brew install libomp + carry
+# the dylib in the .app). Skip openmp here; the CPU path uses NEON SIMD
+# directly via whisper.cpp's intrinsics.
+whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "metal"] }
