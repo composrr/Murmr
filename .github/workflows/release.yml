@@ -74,7 +74,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: ${{ matrix.target }}
+          # Cache key includes deployment target so changing it busts the
+          # cached whisper-rs-sys build (which embeds the deployment target
+          # into the linked Metal symbols). Bumped to v2 after we hit the
+          # __isPlatformVersionAtLeast linker error from a stale cache.
+          key: ${{ matrix.target }}-v2-macos13
 
       # Windows-only LLVM (bindgen needs libclang). macOS gets it from Xcode.
       - name: Install LLVM (Windows)
