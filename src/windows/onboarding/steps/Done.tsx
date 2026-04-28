@@ -1,6 +1,23 @@
+import { useEffect, useState } from 'react';
 import { PrimaryButton, ProgressDots, type StepProps } from '../App';
+import { getSettings } from '../../../lib/ipc';
+import { displayName } from '../../main/pages/HotkeyCapture';
 
 export default function Done({ index, total, finish }: StepProps) {
+  const [dictation, setDictation] = useState('ControlRight');
+  const [repeat, setRepeat] = useState('');
+  const [cancel, setCancel] = useState('Escape');
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        setDictation(s.dictation_hotkey);
+        setRepeat(s.repeat_hotkey);
+        setCancel(s.cancel_hotkey);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col items-center px-12 pt-2 pb-8 min-h-0 overflow-y-auto">
       <div className="w-[64px] h-[64px] rounded-[14px] bg-[#1f1f1c] grid place-items-center mb-4">
@@ -28,15 +45,17 @@ export default function Done({ index, total, finish }: StepProps) {
 
       <div className="grid gap-3 w-full max-w-[480px] mb-7">
         <Reminder
-          chord={<Kbd>Right Ctrl</Kbd>}
+          chord={<Kbd>{displayName(dictation)}</Kbd>}
           label="Tap to toggle, hold for push-to-talk"
         />
+        {repeat && (
+          <Reminder
+            chord={<Kbd>{displayName(repeat)}</Kbd>}
+            label="Re-paste the most recent transcription"
+          />
+        )}
         <Reminder
-          chord={<Kbd>Shift + Right Ctrl</Kbd>}
-          label="Re-paste the most recent transcription"
-        />
-        <Reminder
-          chord={<Kbd>Esc</Kbd>}
+          chord={<Kbd>{displayName(cancel)}</Kbd>}
           label="Cancel a recording in progress"
         />
       </div>

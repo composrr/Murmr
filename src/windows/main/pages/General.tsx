@@ -3,6 +3,7 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useDictationStatus } from '../../../hooks/useDictationStatus';
 import { useSharedUpdater } from '../../../hooks/UpdaterContext';
 import { type useUpdater } from '../../../hooks/useUpdater';
+import { displayName } from './HotkeyCapture';
 import {
   getSettings,
   launchAtLoginActive,
@@ -22,7 +23,7 @@ const THEMES: Theme[] = ['light', 'dark', 'auto'];
 const RECORD_SECONDS = 4;
 
 const STATUS_LABEL: Record<string, string> = {
-  idle: 'Idle — press Right Ctrl to dictate',
+  // 'idle' is built dynamically below using the configured dictation key.
   recording: 'Listening…',
   transcribing: 'Transcribing…',
   injected: 'Injected ✓',
@@ -224,7 +225,9 @@ export default function General() {
               }`}
             />
             <span className="text-[13px] text-text-primary font-medium">
-              {STATUS_LABEL[status.kind] ?? status.kind}
+              {status.kind === 'idle'
+                ? `Idle — press ${displayName(settings?.dictation_hotkey ?? 'ControlRight')} to dictate`
+                : (STATUS_LABEL[status.kind] ?? status.kind)}
             </span>
           </div>
 

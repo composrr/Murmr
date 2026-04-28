@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.8"
+version = "0.1.9"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"

@@ -3,10 +3,12 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import StepFrame from './StepFrame';
 import type { StepProps } from '../App';
 import {
+  getSettings,
   listenStatus,
   recordAndTranscribe,
   setPracticeMode,
 } from '../../../lib/ipc';
+import { displayName } from '../../main/pages/HotkeyCapture';
 
 const TEST_SECONDS = 5;
 const WAVEFORM_BARS = 31;
@@ -17,6 +19,13 @@ export default function Practice(props: StepProps) {
   const [phase, setPhase] = useState<'idle' | 'recording' | 'transcribing'>('idle');
   const [rms, setRms] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
   const [seconds, setSeconds] = useState(TEST_SECONDS);
+  const [dictationKey, setDictationKey] = useState('ControlRight');
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => setDictationKey(s.dictation_hotkey))
+      .catch(() => {});
+  }, []);
   const tickRef = useRef<number | null>(null);
   const buttonBusyRef = useRef(false);
 
@@ -135,7 +144,7 @@ export default function Practice(props: StepProps) {
         <>
           Tap the button below for a five-second test, or press{' '}
           <kbd className="inline-block bg-bg-control border border-border-control rounded-[7px] px-3 py-[3px] text-[12px] font-medium text-text-primary align-[1px]">
-            Right Ctrl
+            {displayName(dictationKey)}
           </kbd>{' '}
           anywhere. The transcript appears below — nothing is pasted or saved.
         </>

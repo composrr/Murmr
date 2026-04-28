@@ -10,6 +10,7 @@ import {
   type Transcription,
 } from '../../../lib/ipc';
 import { dateGroup, formatTime } from '../../../lib/format';
+import { displayName } from './HotkeyCapture';
 
 const DEBOUNCE_MS = 120;
 
@@ -22,6 +23,10 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
+  // Live hotkey labels — re-fetched each mount so changing them in Settings
+  // and clicking back to Home shows the new value.
+  const [dictationKey, setDictationKey] = useState('ControlRight');
+  const [repeatKey, setRepeatKey] = useState('');
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query), DEBOUNCE_MS);
@@ -75,6 +80,9 @@ export default function Home() {
     (async () => {
       try {
         const s = await getSettings();
+        // Hotkey labels live alongside name — single getSettings call.
+        if (s.dictation_hotkey) setDictationKey(s.dictation_hotkey);
+        if (s.repeat_hotkey !== undefined) setRepeatKey(s.repeat_hotkey);
         if (s.display_name && s.display_name.trim()) {
           setName(s.display_name.trim());
           return;
@@ -128,13 +136,18 @@ export default function Home() {
       <p className="text-[13px] text-text-quaternary mb-7">
         Tap or hold{' '}
         <kbd className="inline-block bg-bg-control border border-border-control rounded-[6px] px-[7px] py-[2px] text-[11px] font-medium text-text-primary align-[1px]">
-          Right Ctrl
+          {displayName(dictationKey)}
         </kbd>{' '}
-        anywhere to dictate.{' '}
-        <kbd className="inline-block bg-bg-control border border-border-control rounded-[6px] px-[7px] py-[2px] text-[11px] font-medium text-text-primary align-[1px]">
-          Shift + Right Ctrl
-        </kbd>{' '}
-        re-pastes the most recent.
+        anywhere to dictate.
+        {repeatKey && (
+          <>
+            {' '}
+            <kbd className="inline-block bg-bg-control border border-border-control rounded-[6px] px-[7px] py-[2px] text-[11px] font-medium text-text-primary align-[1px]">
+              {displayName(repeatKey)}
+            </kbd>{' '}
+            re-pastes the most recent.
+          </>
+        )}
       </p>
 
       <div className="relative mb-6">
@@ -170,7 +183,7 @@ export default function Home() {
       {loading && items.length === 0 ? (
         <p className="text-[13px] text-text-quaternary">Loading…</p>
       ) : items.length === 0 ? (
-        <EmptyState />
+        <EmptyState dictationKey={dictationKey} />
       ) : (
         grouped.map(([label, group]) => (
           <section key={label}>
@@ -273,14 +286,14 @@ function ActionButton({
   );
 }
 
-function EmptyState() {
+function EmptyState({ dictationKey }: { dictationKey: string }) {
   return (
     <div className="mt-12 text-center">
       <p className="font-serif text-[18px] text-text-secondary mb-2">
         Your transcriptions will appear here.
       </p>
       <p className="text-[12px] text-text-quaternary">
-        Press Right Ctrl in any text field to give Murmr a try.
+        Press {displayName(dictationKey)} in any text field to give Murmr a try.
       </p>
     </div>
   );
