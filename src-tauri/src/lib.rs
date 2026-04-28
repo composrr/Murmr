@@ -836,16 +836,6 @@ pub fn run() {
                 }
             }
 
-            // macOS 26 regression: tauri.conf.json's `transparent: true` is no
-            // longer enough — the WKWebView paints a white background behind
-            // the pill on Tahoe even with body { background: transparent }.
-            // Explicitly setting alpha=0 via the Tauri API forces the webview
-            // layer underneath to also draw transparent.
-            #[cfg(target_os = "macos")]
-            if let Some(hud) = app.get_webview_window("hud") {
-                let _ = hud.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-            }
-
             // First-run dispatch: open the onboarding wizard if the user
             // hasn't finished it; otherwise reveal the main window.
             let has_onboarded = settings.get().has_completed_onboarding;

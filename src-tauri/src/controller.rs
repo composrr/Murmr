@@ -288,29 +288,20 @@ impl Controller {
     }
 
     fn complete_recording(&self) {
-        eprintln!("[ctrl] complete_recording: entered");
+        // Restore system audio volume FIRST so the chime/typing sounds the
+        // user hears next aren't artificially quiet.
         audio_duck::unduck();
 
         self.emit(Status::Transcribing);
 
         let cap = match self.recorder.stop() {
-            Ok(Some(c)) => {
-                eprintln!(
-                    "[ctrl] complete_recording: got {} samples @ {} Hz, {} ch",
-                    c.samples.len(),
-                    c.sample_rate,
-                    c.channels
-                );
-                c
-            }
+            Ok(Some(c)) => c,
             Ok(None) => {
-                eprintln!("[ctrl] complete_recording: BAIL recorder.stop() returned None (no samples)");
                 self.emit(Status::Cancelled);
                 self.hide_hud();
                 return;
             }
             Err(e) => {
-                eprintln!("[ctrl] complete_recording: BAIL recorder.stop() error: {e}");
                 self.emit(Status::Error {
                     message: format!("stop failed: {e}"),
                 });
@@ -319,27 +310,12 @@ impl Controller {
             }
         };
 
-        // Compute peak/avg RMS for debugging
-        let peak_rms = {
-            let chunk = (cap.sample_rate as usize / 10).max(1);
-            cap.samples
-                .chunks(chunk)
-                .map(|b| {
-                    let sum_sq: f32 = b.iter().map(|&s| s * s).sum();
-                    (sum_sq / b.len() as f32).sqrt()
-                })
-                .fold(0.0_f32, f32::max)
-        };
-        eprintln!("[ctrl] complete_recording: peak chunk RMS = {peak_rms:.4} (VAD threshold {VAD_RMS_THRESHOLD})");
-
         // Energy-based VAD — bail out before invoking Whisper on silence.
         if !has_speech(&cap.samples, cap.sample_rate, VAD_RMS_THRESHOLD) {
-            eprintln!("[ctrl] complete_recording: BAIL has_speech=false (VAD rejected as silence)");
             self.emit(Status::Cancelled);
             self.hide_hud();
             return;
         }
-        eprintln!("[ctrl] complete_recording: VAD passed, spawning transcribe thread");
 
         let transcriber = Arc::clone(&self.transcriber);
         let db = Arc::clone(&self.db);
@@ -384,7 +360,6 @@ impl Controller {
 
                 match result {
                     Ok(text) if text.is_empty() => {
-                        eprintln!("[ctrl] transcribe returned empty text — Cancelled");
                         let _ = app.emit("murmr:status", &Status::Cancelled);
                         hide_hud();
                     }
@@ -412,9 +387,7 @@ impl Controller {
                             return;
                         }
 
-                        eprintln!("[ctrl] transcribed {} chars, injecting...", text.len());
                         if let Err(e) = injector::inject_text(&text) {
-                            eprintln!("[ctrl] injection failed: {e}");
                             sounds.play_error_beep();
                             let _ = app.emit(
                                 "murmr:status",
@@ -425,7 +398,6 @@ impl Controller {
                             hide_hud();
                             return;
                         }
-                        eprintln!("[ctrl] injection succeeded");
 
                         let word_count = text.split_whitespace().count() as i64;
                         match db.insert_transcription(&text, word_count, duration_ms, None) {
