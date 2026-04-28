@@ -86,6 +86,16 @@ jobs:
         run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
         shell: pwsh
 
+      # macOS: install libomp regardless of whether the openmp feature is on.
+      # rust-cache can restore a stale whisper-rs-sys build with `-lomp` in
+      # its link line; without libomp present, the linker errors out. Cheap
+      # to install (~2s, prebuilt bottle) and makes the build robust against
+      # cache state.
+      - name: Install libomp (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+        shell: bash
+
       - name: Install npm dependencies
         run: npm ci
 
