@@ -37,6 +37,10 @@ Thumbs.db
 .keys/license-priv.key
 .keys/*.priv.key
 
+# Personal key generator with the private key embedded inline. Lives next
+# to the safe-to-share key-generator.html. Never commit this one.
+tools/key-generator-personal.html
+
 # Local beta-updater staging directory — populated by `npm run release:beta`
 # and served by `npm run serve:updater`. Contains the latest installer +
 # latest.json. ~140 MB per build; never commit.
