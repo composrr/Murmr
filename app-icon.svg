@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Squircle background — proportions match mockup 09_app_icon (rx 36 on 160 = 22.5%) -->
+  <rect width="1024" height="1024" rx="230" fill="#1f1f1c"/>
+
+  <!-- Centered microphone glyph in warm off-white #fafaf9 -->
+  <g transform="translate(512, 512)">
+    <!-- Capsule body -->
+    <rect x="-102" y="-218" width="205" height="282" rx="102" fill="#fafaf9"/>
+    <!-- Semicircle stand arc -->
+    <path d="M -179 51 Q -179 230 0 230 Q 179 230 179 51"
+          fill="none"
+          stroke="#fafaf9"
+          stroke-width="38"
+          stroke-linecap="round"/>
+    <!-- Short post -->
+    <line x1="0" y1="230" x2="0" y2="333"
+          stroke="#fafaf9"
+          stroke-width="38"
+          stroke-linecap="round"/>
+  </g>
+</svg>

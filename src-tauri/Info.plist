@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Usage descriptions for permission prompts. macOS shows these strings
+        verbatim in the system permission dialogs, so they need to be plain
+        and reassuring. Murmr is privacy-first, so we say so explicitly.
+    -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Murmr listens to your microphone to transcribe your voice on-device. Audio never leaves your machine.</string>
+
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Murmr needs to send keystrokes to the focused app so it can paste your transcribed text.</string>
+
+    <!--
+        rdev / enigo simulate keystrokes via the legacy CGEvent APIs, which
+        macOS gates behind the Accessibility (and on 10.15+, Input Monitoring)
+        permissions in System Settings. There's no usage-description string
+        for those — macOS shows a generic prompt and links the user to the
+        Privacy & Security pane.
+    -->
+
+    <!--
+        Background-friendly app:
+          - LSUIElement = true     no Dock icon (we live in the menu bar)
+          - LSBackgroundOnly = false  still receive mouse / kb events
+        Set LSUIElement=false for now so the user can find the main window
+        from the Dock; we can revisit once the menu bar item is the primary
+        interaction point.
+    -->
+    <key>LSUIElement</key>
+    <false/>
+</dict>
+</plist>

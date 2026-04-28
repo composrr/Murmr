@@ -1,0 +1,103 @@
+[package]
+name = "murmr"
+version = "0.1.5"
+description = "Murmr — privacy-first local voice dictation"
+authors = ["Murmr"]
+edition = "2021"
+
+[lib]
+name = "murmr_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Tuned release profile. LTO is the big one — whisper.cpp's FFI calls
+# get inlined across the boundary, which roughly 2× speeds up
+# transcribe time on the same model.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `devtools` enables Ctrl+Shift+I in release builds. Useful while we're
+# beta-testing — a future v1.0 should drop this so end users can't crack
+# open the JS console.
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio capture + processing
+cpal = "0.15"
+rubato = "0.16"
+hound = "3.5"
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
+
+# Local Whisper transcription.
+# - `raw-api` re-exports whisper-rs-sys so we can hook ggml's own logging
+#   callback (CPU feature detection + threading info).
+# - `openmp` is the BIG one: without it, whisper.cpp falls back to a
+#   single-threaded path inside the inner GEMM loops. CPU-bound transcribe
+#   takes ~5-7× longer (e.g. 7200ms vs 1200ms for 3s audio on a Ryzen 9
+#   5900X). Note this requires libgomp/MSVC OpenMP runtime to be present
+#   on the user's machine — modern Windows + macOS already ship it.
+whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "openmp"] }
+
+# Global hotkey (rdev fires on bare modifiers; tauri-plugin-global-shortcut
+# does not). See plan §13 #5.
+# `unstable_grab` enables `rdev::grab()` (vs `listen()` which is observation-
+# only), so we can SUPPRESS the keypress when it matches a bound dictation
+# key — otherwise binding to e.g. `~` types tildes into the focused app on
+# every press.
+rdev = { version = "0.5", features = ["unstable_grab"] }
+
+# Clipboard + keystroke synthesis for text injection
+arboard = "3"
+enigo = "0.6"
+
+# Persistent storage
+rusqlite = { version = "0.39", features = ["bundled"] }
+
+# Logging + utility
+log = "0.4"
+parking_lot = "0.12"
+thiserror = "2"
+crossbeam-channel = "0.5"
+regex = "1"
+
+# License signing — Ed25519 over a JSON payload. Each license key is a
+# base64-encoded `{ payload_json }.{ signature_b64 }` pair. The app holds
+# only the public key; the matching private key lives offline.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+base64 = "0.22"
+
+# Win32 APIs for HUD positioning (focus module).
+# - windows-sys: lightweight legacy bindings (GetGUIThreadInfo, GetForegroundWindow)
+# - windows:     full COM bindings for UI Automation (modern apps' focused element)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+] }
+
+# macOS: enable Metal acceleration for Whisper. On Apple Silicon this offloads
+# the encoder/decoder to the GPU and typically delivers 3-5× speedup over CPU
+# for the base model. The `metal` feature pulls in Apple's Metal framework
+# automatically — works on Intel Macs too (with a smaller speedup) since
+# every Mac since 2012 has Metal.
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "openmp", "metal"] }

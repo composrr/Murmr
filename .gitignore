@@ -1,0 +1,54 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust + Tauri build artifacts. Multi-GB after a few release builds.
+src-tauri/target/
+target/
+
+# Whisper model — 142 MB, downloaded fresh in CI per build (see
+# .github/workflows/build-*.yml). Local dev devs put it here too.
+src-tauri/models/*.bin
+
+# Per-user app data the build occasionally drops at the project root.
+.DS_Store
+Thumbs.db
+
+# Tauri updater signing — private key must NEVER be committed.
+# Add the contents of .tauri/updater.key to GitHub Secrets as
+# TAURI_SIGNING_PRIVATE_KEY for CI to sign release manifests.
+.tauri/updater.key
+.tauri/*.key
+
+# License key signing — private key NEVER committed. The matching public
+# key (license-pub.key) IS safe to commit but we keep both side-by-side
+# to make the threat model obvious. CI gets the pubkey from a repo
+# secret named MURMR_LICENSE_PUBKEY.
+.keys/license-priv.key
+.keys/*.priv.key
+
+# Local beta-updater staging directory — populated by `npm run release:beta`
+# and served by `npm run serve:updater`. Contains the latest installer +
+# latest.json. ~140 MB per build; never commit.
+release-staging/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

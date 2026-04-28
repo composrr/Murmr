@@ -1,0 +1,11 @@
+# Intentionally empty.
+#
+# Build-time env vars used to live here, but cargo's `[env]` table doesn't
+# support per-target conditions and the MSVC-style flags we need on Windows
+# (`/O2 /Ob2 /DNDEBUG /MD`) would break clang on macOS/Linux (clang would
+# interpret the leading `/` as a filesystem path).
+#
+# All of that lives in `scripts/run-tauri.mjs::setWhisperBuildEnv()` now,
+# which sets the right flags per platform before invoking the Tauri CLI.
+#
+# Run `npm run tauri build` (NOT raw `cargo build`) to pick them up.

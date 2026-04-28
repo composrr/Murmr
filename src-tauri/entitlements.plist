@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Hardened Runtime entitlements for the macOS app bundle. These take
+        effect when the app is signed with a Developer ID; without signing
+        they're read but most macOS gatekeeper checks are bypassed.
+
+        Requested capabilities:
+          - microphone:               capture audio for Whisper transcription
+          - allow-jit:                Tauri's WKWebView needs JIT for V8/JSC
+          - disable-library-validation: load whisper.cpp's compiled libraries
+                                       (which aren't signed by Apple) at runtime
+          - apple-events:             needed for keystroke synthesis (enigo)
+                                       to drive the focused app
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>
