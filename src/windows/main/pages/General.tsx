@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useTheme } from '../../../hooks/useTheme';
 import { useDictationStatus } from '../../../hooks/useDictationStatus';
-import { useUpdater } from '../../../hooks/useUpdater';
+import { useSharedUpdater } from '../../../hooks/UpdaterContext';
+import { type useUpdater } from '../../../hooks/useUpdater';
 import {
   getSettings,
   launchAtLoginActive,
@@ -48,7 +49,9 @@ type TestState =
 export default function General() {
   const { theme, setTheme } = useTheme();
   const { status, lastInjected } = useDictationStatus();
-  const updater = useUpdater(false); // App-level useUpdater already auto-checks; here it's manual.
+  // Shared instance with App.tsx's banner — clicking Check Now here will
+  // update the top-of-window banner and vice versa.
+  const updater = useSharedUpdater();
   const [pong, setPong] = useState<PingResponse | null>(null);
   const [user, setUser] = useState<string | null>(null);
   const [count, setCount] = useState<number | null>(null);

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { getLicenseStatus, ping, type LicenseStatus } from '../../lib/ipc';
 import { useTheme } from '../../hooks/useTheme';
-import { useUpdater } from '../../hooks/useUpdater';
+import { UpdaterProvider, useSharedUpdater } from '../../hooks/UpdaterContext';
 import Paywall from './Paywall';
 import Sidebar from './Sidebar';
 import UpdateBanner from './UpdateBanner';
@@ -16,9 +16,21 @@ import Preferences from './pages/Preferences';
 import Advanced from './pages/Advanced';
 
 export default function App() {
+  // Wrap the actual app body in UpdaterProvider so the banner and Settings
+  // page share one updater instance (single state machine, single Update
+  // handle). Two separate `useUpdater()` calls deadlocked us before — a
+  // check from Settings didn't update the banner.
+  return (
+    <UpdaterProvider>
+      <AppBody />
+    </UpdaterProvider>
+  );
+}
+
+function AppBody() {
   useTheme();
   const [version, setVersion] = useState('0.1.0');
-  const { state: updateState, installNow, dismiss } = useUpdater(true);
+  const { state: updateState, installNow, dismiss } = useSharedUpdater();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
 
