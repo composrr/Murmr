@@ -171,9 +171,8 @@ export interface Settings {
   tap_threshold_ms: number;
   /** rdev key name for the dictation hotkey (e.g. "ControlRight", "F8"). */
   dictation_hotkey: string;
-  /** "Shift" | "Ctrl" | "Alt" | "Meta" | "None" — held with the dictation
-   * key to re-paste the most recent transcription. */
-  repeat_modifier: string;
+  /** rdev key name for the standalone re-paste hotkey. Empty = disabled. */
+  repeat_hotkey: string;
   /** rdev key name for the cancel-recording key (e.g. "Escape"). */
   cancel_hotkey: string;
   hud_show_waveform: boolean;

@@ -34,10 +34,11 @@ pub struct Settings {
     /// (e.g. "ControlRight", "F8", "CapsLock"). Parser lives in
     /// `hotkey::parse_key`. An invalid string falls back to ControlRight.
     pub dictation_hotkey: String,
-    /// Optional modifier that, when held during a dictation-key tap,
-    /// re-injects the most recent transcription instead of starting a
-    /// new recording. One of: "Shift" | "Ctrl" | "Alt" | "Meta" | "None".
-    pub repeat_modifier: String,
+    /// Standalone hotkey that re-injects the most recent transcription.
+    /// Empty string disables it. Same name format as `dictation_hotkey`
+    /// (e.g. "F9", "RightBracket"). Doesn't have to be related to the
+    /// dictation key — pick anything you like.
+    pub repeat_hotkey: String,
     /// Key that cancels an in-flight recording.
     pub cancel_hotkey: String,
 
@@ -97,7 +98,7 @@ impl Default for Settings {
             tap_threshold_ms: 250,
 
             dictation_hotkey: "ControlRight".into(),
-            repeat_modifier: "Shift".into(),
+            repeat_hotkey: String::new(), // disabled by default — opt-in
             cancel_hotkey: "Escape".into(),
 
             hud_show_waveform: true,

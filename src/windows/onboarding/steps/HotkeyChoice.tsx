@@ -9,7 +9,7 @@ export default function HotkeyChoice(props: StepProps) {
   // re-running onboarding, and even on first launch the default is the
   // canonical truth (whatever defaults to in Settings::default()).
   const [dictation, setDictation] = useState('ControlRight');
-  const [repeatMod, setRepeatMod] = useState('Shift');
+  const [repeat, setRepeat] = useState('');
   const [cancel, setCancel] = useState('Escape');
   const [threshold, setThreshold] = useState(250);
 
@@ -17,23 +17,16 @@ export default function HotkeyChoice(props: StepProps) {
     getSettings()
       .then((s) => {
         setDictation(s.dictation_hotkey);
-        setRepeatMod(s.repeat_modifier);
+        setRepeat(s.repeat_hotkey);
         setCancel(s.cancel_hotkey);
         setThreshold(s.tap_threshold_ms);
       })
       .catch(() => {});
   }, []);
 
-  const MOD_LABELS: Record<string, string> = {
-    Shift: 'Shift',
-    Ctrl: 'Ctrl',
-    Alt: 'Alt',
-    Meta: 'Cmd / Win',
-  };
-  const repeatChord =
-    repeatMod === 'None' || !MOD_LABELS[repeatMod]
-      ? null
-      : `${MOD_LABELS[repeatMod]} + ${displayName(dictation)}`;
+  // Re-paste is opt-in (off by default) — only show its card if the user
+  // configured one in Settings.
+  const repeatChord = repeat ? displayName(repeat) : null;
 
   return (
     <StepFrame

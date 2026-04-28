@@ -3,14 +3,6 @@ import { getSettings, saveSettings, type Settings } from '../../../lib/ipc';
 import HotkeyCapture, { displayName } from './HotkeyCapture';
 import { Pill, Row, SettingsHeader } from './settings-ui';
 
-const REPEAT_MODIFIERS: Array<{ value: string; label: string }> = [
-  { value: 'Shift', label: 'Shift' },
-  { value: 'Ctrl', label: 'Ctrl' },
-  { value: 'Alt', label: 'Alt' },
-  { value: 'Meta', label: 'Cmd / Win' },
-  { value: 'None', label: 'No modifier (disable)' },
-];
-
 export default function Hotkeys() {
   const [settings, setSettings] = useState<Settings | null>(null);
 
@@ -28,13 +20,17 @@ export default function Hotkeys() {
   const threshold = settings?.tap_threshold_ms ?? 250;
   const dictation = settings?.dictation_hotkey ?? 'ControlRight';
   const cancel = settings?.cancel_hotkey ?? 'Escape';
-  const repeatMod = settings?.repeat_modifier ?? 'Shift';
+  const repeat = settings?.repeat_hotkey ?? '';
+
+  // Build the forbid list per-row: a key bound to one shortcut shouldn't be
+  // re-bindable to another. Empty repeat = no conflict to track.
+  const allBound = [dictation, cancel, repeat].filter((k) => k.length > 0);
 
   return (
     <div className="max-w-[640px]">
       <SettingsHeader
         title="Hotkeys"
-        subtitle="Recording shortcut, cancel key, and tap-vs-hold threshold."
+        subtitle="Recording shortcut, re-paste shortcut, cancel key, and tap-vs-hold threshold."
       />
 
       <Row name="Recording shortcut" hint="Tap to toggle, hold to push-to-talk. Click and press the key you want.">
@@ -42,38 +38,46 @@ export default function Hotkeys() {
           value={dictation}
           onChange={(next) => update({ dictation_hotkey: next })}
           allowBareModifiers
-          forbidden={[cancel]}
+          forbidden={allBound.filter((k) => k !== dictation)}
           disabled={!settings}
         />
       </Row>
 
       <Row
-        name="Re-paste modifier"
+        name="Re-paste shortcut"
         hint={
-          repeatMod === 'None'
-            ? 'Re-paste shortcut disabled.'
-            : `Hold ${labelFor(repeatMod)} + ${displayName(dictation)} to re-inject the most recent transcription.`
+          repeat
+            ? `Press ${displayName(repeat)} from anywhere to re-inject the most recent transcription.`
+            : 'Set a key here to enable re-paste. Click the chip → press a key. Click "clear" to disable.'
         }
       >
-        <select
-          value={repeatMod}
-          onChange={(e) => update({ repeat_modifier: e.target.value })}
-          disabled={!settings}
-          className="w-[260px] rounded-[8px] border border-border-control bg-bg-control px-3 py-[6px] text-[12px] font-medium text-text-primary"
-        >
-          {REPEAT_MODIFIERS.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2 w-[260px]">
+          <div className="flex-1">
+            <HotkeyCapture
+              value={repeat || 'click to set'}
+              onChange={(next) => update({ repeat_hotkey: next })}
+              allowBareModifiers
+              forbidden={allBound.filter((k) => k !== repeat)}
+              disabled={!settings}
+            />
+          </div>
+          {repeat && (
+            <button
+              onClick={() => update({ repeat_hotkey: '' })}
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              title="Disable re-paste shortcut"
+            >
+              clear
+            </button>
+          )}
+        </div>
       </Row>
 
       <Row name="Cancel key" hint="Stops the current recording and discards it.">
         <HotkeyCapture
           value={cancel}
           onChange={(next) => update({ cancel_hotkey: next })}
-          forbidden={[dictation]}
+          forbidden={allBound.filter((k) => k !== cancel)}
           disabled={!settings}
         />
       </Row>
@@ -104,20 +108,12 @@ export default function Hotkeys() {
       <div className="mt-9 pt-7 border-t border-border-hairline">
         <p className="text-[12px] text-text-tertiary leading-[1.55]">
           <Pill kind="info">Tip</Pill>{' '}
-          Click a key chip and press the key you want — it'll save immediately and the global
-          listener picks it up without restarting Murmr.
-        </p>
-        <p className="text-[12px] text-text-tertiary leading-[1.55] mt-3">
-          Why <strong className="text-text-secondary">{displayName(dictation)}</strong> by default?
-          Right Ctrl tap-vs-hold ergonomics without the menu-bar focus-steal that Right Alt causes
-          on Windows. Function keys (F1–F12) and Caps Lock also work great if you'd rather repurpose
-          one.
+          Click a key chip and press the key you want — saves immediately and the global listener
+          picks it up without restarting Murmr. The key won't pass through to your focused app, so
+          binding to <code className="text-text-secondary">~</code> or{' '}
+          <code className="text-text-secondary">]</code> is safe.
         </p>
       </div>
     </div>
   );
-}
-
-function labelFor(value: string): string {
-  return REPEAT_MODIFIERS.find((m) => m.value === value)?.label ?? value;
 }

@@ -142,12 +142,6 @@ export default function General() {
         />
       </Row>
 
-      <Row name="Shortcut" hint="Tap to toggle, hold to push-to-talk">
-        <kbd className="inline-block bg-bg-control border border-border-control rounded-[7px] px-3 py-[5px] text-[12px] font-medium text-text-primary">
-          Right Ctrl
-        </kbd>
-      </Row>
-
       <Row name="Microphone" hint="Used to capture your voice">
         <select
           disabled

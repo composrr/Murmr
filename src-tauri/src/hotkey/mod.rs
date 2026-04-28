@@ -1,48 +1,42 @@
 //! Global keyboard hotkey listener.
 //!
-//! Uses `rdev` (low-level platform keyboard hook) because the standard
-//! tauri-plugin-global-shortcut family doesn't fire on bare modifier keys —
-//! see plan §13 #5. We hook just the keys we care about and forward them to
-//! the controller as `HotkeyEvent`s; the controller owns the tap-vs-hold
-//! state machine and the "what to do next" decisions.
+//! Uses `rdev::grab` (low-level platform keyboard hook with suppression).
+//! Bound keys (dictation, repeat, cancel) are CONSUMED — they don't reach
+//! the focused app — so binding to e.g. `~` or `K` doesn't paint the
+//! character into whatever input has focus on every press.
+//!
+//! Why not `rdev::listen`? It's observation-only — events still reach the
+//! focused app. Why not `tauri-plugin-global-shortcut`? It doesn't fire
+//! on bare modifier keys (Right Ctrl, etc.), which is the canonical Murmr
+//! ergonomic.
 //!
 //! ## Runtime configuration
 //!
-//! Bindings are stored in a global `Arc<RwLock<HotkeyConfig>>` populated at
-//! startup from `Settings`. The Settings page calls
-//! `update_config(...)` to swap them live without restarting the listener
-//! thread (rdev's `listen()` blocks forever and can't be woken).
+//! Bindings live in a global `Arc<RwLock<HotkeyConfig>>` populated at
+//! startup from `Settings`. The Settings page calls `update_config(...)`
+//! to swap them live without restarting the listener thread (rdev's grab
+//! blocks forever and can't be woken).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use parking_lot::RwLock;
 use rdev::{grab, Event, EventType, Key};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RepeatModifier {
-    Shift,
-    Ctrl,
-    Alt,
-    Meta,
-    None,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct HotkeyConfig {
     pub dictation: Key,
-    pub repeat_mod: RepeatModifier,
+    /// Standalone re-paste key. `None` disables the re-paste shortcut
+    /// entirely (the user can still re-paste from the History page).
+    pub repeat: Option<Key>,
     pub cancel: Key,
 }
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        // Windows: Right Ctrl avoids the menu-bar focus steal that Right Alt
-        // causes; Esc to cancel; Shift+RightCtrl re-pastes.
         Self {
             dictation: Key::ControlRight,
-            repeat_mod: RepeatModifier::Shift,
+            repeat: None,
             cancel: Key::Escape,
         }
     }
@@ -53,8 +47,8 @@ pub enum HotkeyEvent {
     DictationDown,
     DictationUp,
     EscDown,
-    /// Modifier was held when the dictation key was pressed — re-inject the
-    /// most recent transcription instead of starting a new recording.
+    /// User pressed the standalone re-paste key. The controller re-injects
+    /// the most recent transcription.
     RepeatLast,
 }
 
@@ -81,15 +75,8 @@ pub fn update_config(new_config: HotkeyConfig) {
 }
 
 /// Parse a key name from settings (matches `format!("{:?}", Key::*)`) into
-/// an rdev::Key. Returns `None` on unknown names so callers can keep the
-/// previous binding instead of crashing.
-///
-/// Names follow rdev's `Debug` impl so it's a 1:1 round-trip with what
-/// `format!("{:?}", key)` produces. Coverage:
-///   - All modifier + nav + F-keys
-///   - Letters (KeyA..KeyZ)
-///   - Top-row numbers (Num0..Num9) + symbol keys
-///   - Numpad (Kp0..Kp9, KpPlus, KpMinus, etc)
+/// an rdev::Key. Returns `None` on unknown / empty names so callers can
+/// keep the previous binding (or treat as "disabled").
 pub fn parse_key(name: &str) -> Option<Key> {
     match name {
         // Modifiers
@@ -147,7 +134,7 @@ pub fn parse_key(name: &str) -> Option<Key> {
         "Num7" => Some(Key::Num7),
         "Num8" => Some(Key::Num8),
         "Num9" => Some(Key::Num9),
-        // Letters (rdev names them KeyA..KeyZ)
+        // Letters
         "KeyA" => Some(Key::KeyA),
         "KeyB" => Some(Key::KeyB),
         "KeyC" => Some(Key::KeyC),
@@ -208,23 +195,13 @@ pub fn parse_key(name: &str) -> Option<Key> {
     }
 }
 
-pub fn parse_repeat_modifier(name: &str) -> RepeatModifier {
-    match name {
-        "Shift" => RepeatModifier::Shift,
-        "Ctrl" => RepeatModifier::Ctrl,
-        "Alt" => RepeatModifier::Alt,
-        "Meta" => RepeatModifier::Meta,
-        _ => RepeatModifier::None,
-    }
-}
-
-/// Build a `HotkeyConfig` from raw setting strings, falling back to the
-/// defaults for any field that doesn't parse.
-pub fn config_from_strings(dictation: &str, repeat_mod: &str, cancel: &str) -> HotkeyConfig {
+/// Build a `HotkeyConfig` from raw setting strings. Empty `repeat` =
+/// disabled. Falls back to defaults for fields that don't parse.
+pub fn config_from_strings(dictation: &str, repeat: &str, cancel: &str) -> HotkeyConfig {
     let defaults = HotkeyConfig::default();
     HotkeyConfig {
         dictation: parse_key(dictation).unwrap_or(defaults.dictation),
-        repeat_mod: parse_repeat_modifier(repeat_mod),
+        repeat: parse_key(repeat),
         cancel: parse_key(cancel).unwrap_or(defaults.cancel),
     }
 }
@@ -235,27 +212,12 @@ pub fn config_from_strings(dictation: &str, repeat_mod: &str, cancel: &str) -> H
 /// events to the supplied sender. `rdev::grab` blocks forever, so it must
 /// own its own thread.
 ///
-/// We use `grab` (not `listen`) specifically so the callback can return
-/// `None` for the bound dictation/cancel keys — that consumes the keypress
-/// before it reaches the focused app. Without this, binding to e.g. `~` or
-/// `K` would type that character into whatever input has focus every time
-/// the user starts dictation.
-///
 /// Cost: `grab` runs in the OS keyboard hook hot path (every key the user
-/// types). Our callback is ~microseconds (a couple atomic loads + a
-/// channel send), so latency added to normal typing is unmeasurable.
-///
-/// `initial_config` seeds the global config; subsequent updates flow through
-/// `update_config(...)` and the listener picks them up on the next event
-/// (RwLock read is sub-microsecond so this is fine in the hot path).
+/// types). Our callback is ~microseconds (one RwLock read + a channel
+/// send), so latency added to normal typing is unmeasurable.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     *config_handle().write() = initial_config;
 
-    // Track every modifier key we might gate on. We watch all four families
-    // (Shift / Ctrl / Alt / Meta) so the user can pick any of them as the
-    // re-paste modifier without us having to spawn separate state machines.
-    let modifier_state = ModifierState::default();
-    let mods_for_cb = modifier_state.clone();
     let cfg_for_cb = config_handle();
 
     std::thread::Builder::new()
@@ -264,29 +226,11 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
             let result = grab(move |event: Event| -> Option<Event> {
                 let cfg = *cfg_for_cb.read();
 
-                // Snapshot modifier state PRIOR to applying this event. Stops
-                // the dictation key from self-triggering RepeatLast when the
-                // user picks the same modifier family as both the dictation
-                // key and the repeat modifier.
-                let was_repeat_mod_held = mods_for_cb.matches(cfg.repeat_mod);
-
-                // Now apply this event's effect on modifier state so the
-                // *next* event sees the right snapshot.
-                if let Some(slot) = modifier_slot(&event.event_type) {
-                    let pressed = matches!(event.event_type, EventType::KeyPress(_));
-                    mods_for_cb.set(slot, pressed);
-                }
-
                 // Decide if this event is one of ours, AND whether to
                 // suppress it (so it doesn't ALSO reach the focused app).
                 let (msg, suppress) = match event.event_type {
                     EventType::KeyPress(k) if k == cfg.dictation => {
-                        let event = if was_repeat_mod_held {
-                            HotkeyEvent::RepeatLast
-                        } else {
-                            HotkeyEvent::DictationDown
-                        };
-                        (Some(event), true)
+                        (Some(HotkeyEvent::DictationDown), true)
                     }
                     EventType::KeyRelease(k) if k == cfg.dictation => {
                         // Suppress the release too so e.g. a held `~`
@@ -294,13 +238,17 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         // commit the character.
                         (Some(HotkeyEvent::DictationUp), true)
                     }
+                    EventType::KeyPress(k) if Some(k) == cfg.repeat => {
+                        (Some(HotkeyEvent::RepeatLast), true)
+                    }
+                    EventType::KeyRelease(k) if Some(k) == cfg.repeat => {
+                        // Suppress the release for symmetry.
+                        (None, true)
+                    }
                     EventType::KeyPress(k) if k == cfg.cancel => {
-                        // Suppress cancel so e.g. binding to Escape during
-                        // recording doesn't ALSO close the user's modal.
                         (Some(HotkeyEvent::EscDown), true)
                     }
                     EventType::KeyRelease(k) if k == cfg.cancel => {
-                        // Suppress the release for symmetry with the press.
                         (None, true)
                     }
                     _ => (None, false),
@@ -320,58 +268,4 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
             }
         })
         .expect("failed to spawn hotkey thread");
-}
-
-// --- Modifier tracking -----------------------------------------------------
-
-#[derive(Default, Clone)]
-struct ModifierState {
-    shift: Arc<AtomicBool>,
-    ctrl: Arc<AtomicBool>,
-    alt: Arc<AtomicBool>,
-    meta: Arc<AtomicBool>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ModSlot {
-    Shift,
-    Ctrl,
-    Alt,
-    Meta,
-}
-
-impl ModifierState {
-    fn set(&self, slot: ModSlot, pressed: bool) {
-        let cell = match slot {
-            ModSlot::Shift => &self.shift,
-            ModSlot::Ctrl => &self.ctrl,
-            ModSlot::Alt => &self.alt,
-            ModSlot::Meta => &self.meta,
-        };
-        cell.store(pressed, Ordering::Relaxed);
-    }
-
-    fn matches(&self, modifier: RepeatModifier) -> bool {
-        match modifier {
-            RepeatModifier::Shift => self.shift.load(Ordering::Relaxed),
-            RepeatModifier::Ctrl => self.ctrl.load(Ordering::Relaxed),
-            RepeatModifier::Alt => self.alt.load(Ordering::Relaxed),
-            RepeatModifier::Meta => self.meta.load(Ordering::Relaxed),
-            RepeatModifier::None => false,
-        }
-    }
-}
-
-fn modifier_slot(event: &EventType) -> Option<ModSlot> {
-    let key = match event {
-        EventType::KeyPress(k) | EventType::KeyRelease(k) => *k,
-        _ => return None,
-    };
-    match key {
-        Key::ShiftLeft | Key::ShiftRight => Some(ModSlot::Shift),
-        Key::ControlLeft | Key::ControlRight => Some(ModSlot::Ctrl),
-        Key::Alt | Key::AltGr => Some(ModSlot::Alt),
-        Key::MetaLeft | Key::MetaRight => Some(ModSlot::Meta),
-        _ => None,
-    }
 }

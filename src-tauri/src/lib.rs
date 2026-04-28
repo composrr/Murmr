@@ -295,7 +295,7 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
     // Settings page is responsible for surfacing invalid choices.
     let new_hotkeys = hotkey::config_from_strings(
         &new_settings.dictation_hotkey,
-        &new_settings.repeat_modifier,
+        &new_settings.repeat_hotkey,
         &new_settings.cancel_hotkey,
     );
     hotkey::update_config(new_hotkeys);
@@ -801,7 +801,7 @@ pub fn run() {
                 let s = settings.get();
                 hotkey::config_from_strings(
                     &s.dictation_hotkey,
-                    &s.repeat_modifier,
+                    &s.repeat_hotkey,
                     &s.cancel_hotkey,
                 )
             };
