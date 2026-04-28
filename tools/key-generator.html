@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Murmr · License Key Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /*
+      Single-file Ed25519 license-key generator. Uses the Web Crypto API
+      (no external libraries, no network calls). The private key never
+      leaves this page — it lives in localStorage on this browser only.
+
+      To set up:
+        1. Open this file in a browser by double-clicking it.
+        2. Paste the contents of `.keys/license-priv.key` and
+           `.keys/license-pub.key` into the two boxes once. Click "Save keys".
+        3. From then on, just fill in the email + click Generate.
+
+      The generated key is byte-for-byte identical to what
+      `npm run license:issue --email …` produces from the CLI, so installs
+      built from your repo will accept it.
+    */
+
+    :root {
+      --bg: #faf9f6;
+      --row: #f3f1ec;
+      --hairline: #e2dfd7;
+      --control: #ffffff;
+      --text: #1f1f1c;
+      --muted: #767472;
+      --accent: #1f1f1c;
+      --accent-fg: #fafaf9;
+      --error: #c14a2b;
+      --ok: #4a7f3f;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1b18;
+        --row: #25241f;
+        --hairline: #34322c;
+        --control: #1f1e1a;
+        --text: #e9e7e0;
+        --muted: #8e8a82;
+        --accent: #d4d4cf;
+        --accent-fg: #1f1f1c;
+        --error: #e87a5e;
+        --ok: #93c98a;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 24px 64px;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    h1 {
+      font-family: "Source Serif 4", "Source Serif Pro", Cambria, Georgia, serif;
+      font-weight: 400;
+      font-size: 32px;
+      letter-spacing: -0.5px;
+      margin: 0 0 6px;
+    }
+    .sub { color: var(--muted); font-size: 13px; margin: 0 0 28px; }
+    .card {
+      background: var(--row);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      padding: 22px;
+      margin-bottom: 18px;
+    }
+    .card h2 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 12px 0 4px;
+      letter-spacing: 0.02em;
+    }
+    label:first-child { margin-top: 0; }
+    input[type="text"], input[type="email"], input[type="date"], textarea {
+      width: 100%;
+      background: var(--control);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--text);
+    }
+    textarea {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      resize: vertical;
+      min-height: 64px;
+    }
+    select {
+      background: var(--control);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-top: 14px;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--hairline);
+    }
+    .out {
+      background: var(--control);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 11px;
+      word-break: break-all;
+      max-height: 180px;
+      overflow: auto;
+      color: var(--text);
+    }
+    .meta { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+    .err { color: var(--error); font-size: 12px; margin-top: 8px; }
+    .ok { color: var(--ok); font-size: 12px; margin-top: 8px; }
+    .row-flex { display: flex; gap: 8px; align-items: center; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--row);
+      border: 1px solid var(--hairline);
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: 8px;
+    }
+    .pill.ok { background: rgba(74, 127, 63, 0.15); border-color: var(--ok); color: var(--ok); }
+    .pill.warn { background: rgba(193, 74, 43, 0.15); border-color: var(--error); color: var(--error); }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Murmr · License key generator</h1>
+  <p class="sub">Mints offline Ed25519-signed license keys. Same format as <code>npm run license:issue</code>.</p>
+
+  <!-- ---------- Keys ---------- -->
+  <div class="card">
+    <h2>Signing keys
+      <span id="keys-status" class="pill">not loaded</span>
+    </h2>
+
+    <label>Private key — paste contents of <code>.keys/license-priv.key</code></label>
+    <textarea id="priv" placeholder="44-char base64url string"></textarea>
+
+    <label>Public key — paste contents of <code>.keys/license-pub.key</code></label>
+    <textarea id="pub" placeholder="44-char base64url string"></textarea>
+
+    <div class="row-flex">
+      <button id="save-keys">Save keys to this browser</button>
+      <button id="clear-keys" class="ghost">Forget keys</button>
+    </div>
+    <p class="meta">Keys are stored only in this browser's localStorage. Never sent anywhere.</p>
+    <p id="keys-msg"></p>
+  </div>
+
+  <!-- ---------- Mint ---------- -->
+  <div class="card">
+    <h2>Mint a license</h2>
+
+    <label>Email (identifies the licensee)</label>
+    <input type="email" id="email" placeholder="teammate@company.com" autocomplete="off">
+
+    <div class="row">
+      <div>
+        <label>Expires (optional)</label>
+        <input type="date" id="expires">
+      </div>
+      <div>
+        <label>Tier (optional)</label>
+        <input type="text" id="tier" placeholder="pro · free · …" autocomplete="off">
+      </div>
+    </div>
+
+    <button id="mint">Generate license key</button>
+    <p id="mint-msg"></p>
+  </div>
+
+  <!-- ---------- Output ---------- -->
+  <div class="card" id="output-card" style="display:none">
+    <h2>Generated license</h2>
+    <div class="out" id="output"></div>
+    <p class="meta" id="output-meta"></p>
+    <button id="copy">Copy to clipboard</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+
+// --- base64url helpers ----------------------------------------------------
+function b64urlEncode(bytes) {
+  let s = btoa(String.fromCharCode(...bytes));
+  return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str) {
+  const pad = '==='.slice((str.length + 3) % 4);
+  const std = str.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const bin = atob(std);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// --- key state -------------------------------------------------------------
+function loadKeysFromStorage() {
+  $('priv').value = localStorage.getItem('murmr.priv') || '';
+  $('pub').value = localStorage.getItem('murmr.pub') || '';
+  refreshKeysStatus();
+}
+
+function refreshKeysStatus() {
+  const priv = $('priv').value.trim();
+  const pub = $('pub').value.trim();
+  const ok = priv.length >= 40 && pub.length >= 40;
+  const pill = $('keys-status');
+  pill.textContent = ok ? 'loaded' : 'not loaded';
+  pill.className = 'pill ' + (ok ? 'ok' : 'warn');
+}
+
+$('save-keys').addEventListener('click', () => {
+  const priv = $('priv').value.trim();
+  const pub = $('pub').value.trim();
+  try {
+    if (b64urlDecode(priv).length !== 32) throw new Error('private key must decode to 32 bytes');
+    if (b64urlDecode(pub).length !== 32) throw new Error('public key must decode to 32 bytes');
+  } catch (e) {
+    showMsg('keys-msg', 'err', e.message);
+    return;
+  }
+  localStorage.setItem('murmr.priv', priv);
+  localStorage.setItem('murmr.pub', pub);
+  refreshKeysStatus();
+  showMsg('keys-msg', 'ok', 'Saved. You can close this tab and reopen it later.');
+});
+
+$('clear-keys').addEventListener('click', () => {
+  if (!confirm('Forget the saved private key on this browser?')) return;
+  localStorage.removeItem('murmr.priv');
+  localStorage.removeItem('murmr.pub');
+  $('priv').value = '';
+  $('pub').value = '';
+  refreshKeysStatus();
+  showMsg('keys-msg', 'ok', 'Forgotten.');
+});
+
+['priv', 'pub'].forEach((id) => $(id).addEventListener('input', refreshKeysStatus));
+
+function showMsg(id, klass, text) {
+  const el = $(id);
+  el.className = klass;
+  el.textContent = text;
+}
+
+// --- mint -----------------------------------------------------------------
+$('mint').addEventListener('click', async () => {
+  const email = $('email').value.trim();
+  const expiresInput = $('expires').value; // YYYY-MM-DD
+  const tier = $('tier').value.trim();
+
+  if (!email) { showMsg('mint-msg', 'err', 'Email is required.'); return; }
+
+  const priv = (localStorage.getItem('murmr.priv') || $('priv').value).trim();
+  const pub = (localStorage.getItem('murmr.pub') || $('pub').value).trim();
+  if (!priv || !pub) {
+    showMsg('mint-msg', 'err', 'Paste your signing keys first (see Signing keys above).');
+    return;
+  }
+
+  try {
+    const privBytes = b64urlDecode(priv);
+    const pubBytes = b64urlDecode(pub);
+    if (privBytes.length !== 32 || pubBytes.length !== 32) {
+      throw new Error('keys must decode to 32 bytes each');
+    }
+
+    // Build the same JSON payload the Node CLI does. Field order DOESN'T
+    // matter for verification (we sign the bytes as written, and Murmr
+    // verifies those exact bytes), but matching the CLI keeps the licenses
+    // visually similar.
+    const issuedAt = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    const payload = { email, issued_at: issuedAt };
+    if (expiresInput) payload.expires_at = `${expiresInput}T23:59:59Z`;
+    if (tier) payload.tier = tier;
+
+    const payloadJson = JSON.stringify(payload);
+    const payloadBytes = new TextEncoder().encode(payloadJson);
+
+    // Web Crypto wants a JWK to import an Ed25519 private key. JWK 'd' is
+    // the raw 32-byte private; 'x' is the matching 32-byte public; both
+    // base64url-no-pad. Browser support: Chrome 113+, Firefox 130+,
+    // Safari 17+ (which covers every still-updated browser).
+    const jwk = {
+      kty: 'OKP',
+      crv: 'Ed25519',
+      d: b64urlEncode(privBytes),
+      x: b64urlEncode(pubBytes),
+    };
+
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      jwk,
+      { name: 'Ed25519' },
+      false,        // not extractable
+      ['sign'],
+    );
+
+    const sigBytes = new Uint8Array(
+      await crypto.subtle.sign('Ed25519', key, payloadBytes),
+    );
+
+    const license = `${b64urlEncode(payloadBytes)}.${b64urlEncode(sigBytes)}`;
+
+    $('output').textContent = license;
+    $('output-meta').textContent = `${payloadJson}  ·  ${license.length} chars`;
+    $('output-card').style.display = 'block';
+    $('output-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showMsg('mint-msg', 'ok', 'Generated. Send the long string above.');
+  } catch (e) {
+    console.error(e);
+    showMsg('mint-msg', 'err', `Failed: ${e.message || e}`);
+  }
+});
+
+// --- copy ------------------------------------------------------------------
+$('copy').addEventListener('click', async () => {
+  const text = $('output').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    $('copy').textContent = 'Copied ✓';
+    setTimeout(() => $('copy').textContent = 'Copy to clipboard', 1500);
+  } catch {
+    // Clipboard API requires HTTPS / focused doc on file://; fall back.
+    const r = document.createRange();
+    r.selectNodeContents($('output'));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    document.execCommand('copy');
+  }
+});
+
+// --- init ------------------------------------------------------------------
+loadKeysFromStorage();
+</script>
+</body>
+</html>
