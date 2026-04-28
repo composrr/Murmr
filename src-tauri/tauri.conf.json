@@ -90,7 +90,7 @@
       "active": true,
       "endpoints": [
         "http://127.0.0.1:8123/latest.json",
-        "https://github.com/composrr/murmr/releases/latest/download/latest.json"
+        "https://github.com/composrr/Murmr/releases/latest/download/latest.json"
       ],
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxRUUwODM3QTM3RTlBMTEKUldRUm1uNmpOd2p1WVY3NlpjeWVyUkp4YkZwNGo2QzBzSUFlV0c0RkJWalBhbHpIMXJVY0g5N0EK",
