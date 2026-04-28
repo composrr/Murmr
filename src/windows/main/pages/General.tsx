@@ -189,7 +189,11 @@ export default function General() {
 
       <Row name="Check for updates" hint={updaterHint(updater.state, pong?.version ?? '0.1.0')}>
         <button
-          onClick={() => updater.checkNow()}
+          onClick={() =>
+            updater.state.kind === 'available'
+              ? updater.installNow()
+              : updater.checkNow()
+          }
           disabled={updater.state.kind === 'checking' || updater.state.kind === 'downloading'}
           className="text-[12px] px-[14px] py-[6px] rounded-[8px] border border-border-control bg-bg-content text-text-primary font-medium hover:bg-bg-control disabled:opacity-50"
         >
