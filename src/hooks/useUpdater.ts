@@ -14,6 +14,13 @@ export type UpdaterState =
     }
   | { kind: 'downloading'; downloaded: number; total: number | null }
   | { kind: 'ready' }
+  /** A network/parse failure during a `check()` call. Kept distinct from
+   * install errors so the UI can be quiet about it (auto-checks fire on
+   * every launch and on a timer; one transient failure shouldn't slap a
+   * red banner across the top of the window). */
+  | { kind: 'check-failed'; message: string }
+  /** An error during the actual download/install. The user is actively
+   * waiting for this, so it warrants a visible error. */
   | { kind: 'error'; message: string };
 
 /// Manages auto-update state. Background-checks once on mount (after a brief
@@ -59,7 +66,7 @@ export function useUpdater(autoCheck = true) {
       }
     } catch (e) {
       console.error('[updater] check failed:', e);
-      setState({ kind: 'error', message: String(e) });
+      setState({ kind: 'check-failed', message: String(e) });
     }
   }, []);
 

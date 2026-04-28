@@ -323,8 +323,12 @@ function updaterHint(
         : `Downloaded ${formatBytes(state.downloaded)}`;
     case 'ready':
       return 'Update installed — restarting Murmr…';
+    case 'check-failed':
+      // Routine: server unreachable, no internet, etc. Stay friendly —
+      // user can click Check now to retry.
+      return `Couldn't reach the update server. You're on v${currentVersion}.`;
     case 'error':
-      return `Couldn't check: ${state.message}`;
+      return `Install failed: ${state.message}`;
   }
 }
 
