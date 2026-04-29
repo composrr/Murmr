@@ -119,9 +119,15 @@ jobs:
           # Match tauri.conf.json's macOS minimumSystemVersion. Ggml-metal
           # uses `@available(macOS 13, *)` checks; if the deployment target
           # is older, clang emits __isPlatformVersionAtLeast runtime calls
-          # the linker can't resolve without -lclang_rt.osx. Bumping to 13
-          # makes clang skip the check entirely.
+          # the linker can't resolve without -lclang_rt.osx.
+          #
+          # We set BOTH env vars because they reach different toolchains:
+          #   - MACOSX_DEPLOYMENT_TARGET is read by cc-rs (Rust C-FFI builds)
+          #   - CMAKE_OSX_DEPLOYMENT_TARGET is read by CMake (whisper.cpp's
+          #     ggml-metal Objective-C compile uses CMake, not cc-rs).
+          # Setting only the first is what failed v0.1.11 twice.
           MACOSX_DEPLOYMENT_TARGET: '13.0'
+          CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
         run: |
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             npm run tauri build -- --target ${{ matrix.target }}
