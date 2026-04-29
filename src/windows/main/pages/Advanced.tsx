@@ -17,7 +17,6 @@ import {
   SectionHeader,
   Segmented,
   SettingsHeader,
-  Toggle,
 } from './settings-ui';
 
 const LOG_LEVELS = [
@@ -57,7 +56,7 @@ export default function Advanced() {
     <div className="max-w-[640px]">
       <SettingsHeader
         title="Advanced"
-        subtitle="Speech model, GPU backend, injection mode, log level."
+        subtitle="Speech model, injection mode, log level."
       />
 
       <SectionHeader>Speech model</SectionHeader>
@@ -66,14 +65,12 @@ export default function Advanced() {
           {paths.model_path}
         </span>
       </Row>
-      <Row name="GPU backend" hint="Enable Metal/CUDA/Vulkan in a future phase">
-        <span className="text-[12px] text-text-primary font-medium">
-          Using: CPU
-        </span>
+      <Row name="Compute backend">
+        <span className="text-[12px] text-text-primary font-medium">CPU</span>
       </Row>
-      <Row name="Force CPU even if a GPU backend is available">
-        <Toggle on={settings.force_cpu} onChange={(v) => update({ force_cpu: v })} />
-      </Row>
+      {/* Removed "Force CPU" toggle + "GPU backend in a future phase" — we
+          run CPU-only on every platform right now. Add the toggle back
+          when CUDA / Metal lands as a real path. */}
 
       <SectionHeader>Injection</SectionHeader>
       <Row name="Injection mode" hint="Clipboard-paste is the default; per-keystroke is a fallback for paste-blocking apps.">
@@ -138,9 +135,9 @@ export default function Advanced() {
       </Row>
 
       <p className="text-[11px] text-text-quaternary mt-6">
-        <Pill kind="warn">Heads up</Pill>{' '}
-        Injection-mode swap, log-level routing, log-file viewing, and reset land in Phases 7–9.
-        Path display + Open-folder are live.
+        <Pill kind="info">Note</Pill>{' '}
+        Path display + open-folder buttons are live. The injection-mode toggle, log-level
+        selector, and reset are persisted but not yet wired to the backend.
       </p>
     </div>
   );

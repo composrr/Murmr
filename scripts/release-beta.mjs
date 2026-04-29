@@ -99,7 +99,10 @@ if (!skipBuild) {
 
 // --- Step 3: locate artifacts + read .sig ---------------------------------
 
-const targetDir = join(ROOT, 'src-tauri', 'target', 'release', 'bundle');
+// Respect CARGO_TARGET_DIR — useful when Defender locks the normal target
+// dir and we need to build to a sibling location instead.
+const cargoTargetDir = process.env.CARGO_TARGET_DIR || join(ROOT, 'src-tauri', 'target');
+const targetDir = join(cargoTargetDir, 'release', 'bundle');
 
 // Tauri's NSIS bundler emits the installer + a separate signature file. We
 // upload the installer as-is and fold the .sig contents into latest.json.

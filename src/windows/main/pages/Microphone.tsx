@@ -14,7 +14,6 @@ import {
   Pill,
   Row,
   SettingsHeader,
-  Toggle,
 } from './settings-ui';
 
 const WAVEFORM_BARS = 25;
@@ -133,17 +132,17 @@ export default function Microphone() {
         </div>
       </Row>
 
-      <Row name="Noise suppression" hint="Wired in Phase 9.">
-        <Toggle
-          on={settings?.noise_suppression ?? false}
-          onChange={(v) => update({ noise_suppression: v })}
-          disabled={!settings}
-        />
-      </Row>
+      {/* Noise suppression — removed for now. The toggle was cosmetic; we
+          never wired it to a real DSP path. Re-add when we plug in RNNoise
+          or webrtc-ns. */}
 
       <Row
         name="Duck system audio"
-        hint="Setting persists, but the Windows volume API plumbing isn't shipped yet — slider has no effect on this build."
+        hint={
+          (settings?.audio_duck_amount ?? 0) === 0
+            ? 'Off — system volume stays at full while recording.'
+            : `Lowers the master output by ${Math.round(((settings?.audio_duck_amount ?? 0) * 100))}% during recording so background music gets out of the way.`
+        }
       >
         <div className="flex items-center gap-3 w-[260px]">
           <input
