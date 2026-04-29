@@ -207,24 +207,24 @@ jobs:
           WIN_EXE="$(find artifacts/windows-x86_64 -name '*-setup.exe' | head -1)"
           WIN_SIG="$(find artifacts/windows-x86_64 -name '*-setup.exe.sig' | head -1)"
 
-          MAC_ARM_TGZ="$(find artifacts/darwin-aarch64 -name '*.app.tar.gz' | head -1)"
           MAC_ARM_SIG="$(find artifacts/darwin-aarch64 -name '*.app.tar.gz.sig' | head -1)"
-
-          MAC_X64_TGZ="$(find artifacts/darwin-x86_64 -name '*.app.tar.gz' | head -1)"
           MAC_X64_SIG="$(find artifacts/darwin-x86_64 -name '*.app.tar.gz.sig' | head -1)"
 
           BASE="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}"
 
-          # Build JSON with jq so quoting is safe.
+          # Build JSON with jq so quoting is safe. URLs use the renamed
+          # arch-suffixed filenames we'll produce in the next step (the raw
+          # .app.tar.gz files from Tauri don't include arch in the name and
+          # would collide if uploaded as-is).
           jq -n \
             --arg version "$VERSION" \
             --arg notes "$NOTES" \
             --arg pubdate "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg win_url "$BASE/$(basename "$WIN_EXE")" \
             --arg win_sig "$(read_sig "$WIN_SIG")" \
-            --arg mac_arm_url "$BASE/$(basename "$MAC_ARM_TGZ")" \
+            --arg mac_arm_url "$BASE/Murmr_${VERSION}_aarch64.app.tar.gz" \
             --arg mac_arm_sig "$(read_sig "$MAC_ARM_SIG")" \
-            --arg mac_x64_url "$BASE/$(basename "$MAC_X64_TGZ")" \
+            --arg mac_x64_url "$BASE/Murmr_${VERSION}_x86_64.app.tar.gz" \
             --arg mac_x64_sig "$(read_sig "$MAC_X64_SIG")" \
             '{
                version: $version,
@@ -242,13 +242,34 @@ jobs:
 
       - name: Collect installers for the release
         run: |
+          set -euo pipefail
           mkdir -p dist
-          # Copy every installer + sig into a flat dist/ for the release upload.
+          VERSION="${{ steps.ver.outputs.version }}"
+
+          # Windows + DMG files already have unique names (architecture is
+          # in the filename via Tauri's bundler). Just flat-copy.
           find artifacts -type f \( -name '*.exe' -o -name '*.exe.sig' \
                                   -o -name '*.msi' -o -name '*.msi.sig' \
-                                  -o -name '*.dmg' \
-                                  -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \) \
+                                  -o -name '*.dmg' \) \
             -exec cp {} dist/ \;
+
+          # Mac .app.tar.gz files DON'T include the architecture in their
+          # name — both arches produce a file literally called
+          # "Murmr.app.tar.gz". Flat-copying both clobbers one. Rename per
+          # artifact-source folder so each arch keeps its own signature.
+          for arch_dir in artifacts/darwin-aarch64 artifacts/darwin-x86_64; do
+            [ -d "$arch_dir" ] || continue
+            arch="${arch_dir##*/darwin-}"  # "aarch64" or "x86_64"
+            tarball="$(find "$arch_dir" -name '*.app.tar.gz' | head -1 || true)"
+            sig="$(find "$arch_dir" -name '*.app.tar.gz.sig' | head -1 || true)"
+            if [ -n "$tarball" ]; then
+              cp "$tarball" "dist/Murmr_${VERSION}_${arch}.app.tar.gz"
+            fi
+            if [ -n "$sig" ]; then
+              cp "$sig" "dist/Murmr_${VERSION}_${arch}.app.tar.gz.sig"
+            fi
+          done
+
           cp latest.json dist/
           ls -la dist/
 
