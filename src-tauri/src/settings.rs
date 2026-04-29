@@ -22,10 +22,10 @@ pub struct Settings {
     pub microphone_gain_db: f32,
     pub noise_suppression: bool,
 
-    /// How aggressively to lower the system master volume while recording.
-    /// 0.0 = no ducking, 1.0 = mute. Defaults to 0.3 (30% reduction) which
-    /// is loud enough that the start/stop chimes still cut through but
-    /// quiet enough that background music/video gets out of the way.
+    /// How aggressively to lower per-app audio sessions while recording.
+    /// 0.0 = no ducking, 1.0 = mute. Defaults to 0.8 (80% reduction) — at
+    /// that level background music drops to a murmur but Murmr's own start
+    /// chime still cuts through (we exclude our own session from the duck).
     pub audio_duck_amount: f32,
 
     pub tap_threshold_ms: u32,
@@ -93,7 +93,7 @@ impl Default for Settings {
             microphone_gain_db: 0.0,
             noise_suppression: false,
 
-            audio_duck_amount: 0.3,
+            audio_duck_amount: 0.8,
 
             tap_threshold_ms: 250,
 

@@ -148,15 +148,15 @@ export default function Microphone() {
           <input
             type="range"
             min={0}
-            max={0.7}
+            max={0.95}
             step={0.05}
-            value={settings?.audio_duck_amount ?? 0.3}
+            value={settings?.audio_duck_amount ?? 0.8}
             onChange={(e) => update({ audio_duck_amount: parseFloat(e.target.value) })}
             disabled={!settings}
             className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
           />
           <span className="text-[12px] text-text-tertiary tabular-nums w-[44px] text-right">
-            {((settings?.audio_duck_amount ?? 0.3) * 100).toFixed(0)}%
+            {((settings?.audio_duck_amount ?? 0.8) * 100).toFixed(0)}%
           </span>
         </div>
       </Row>

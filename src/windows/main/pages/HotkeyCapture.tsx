@@ -37,34 +37,52 @@ export default function HotkeyCapture({
   useEffect(() => {
     if (!capturing) return;
 
+    // State: which modifiers are currently held + the rdev name of the FIRST
+    // modifier pressed. We use this to support "press a single bare modifier
+    // and release it" → bind to that modifier. If the user adds a non-
+    // modifier key BEFORE releasing, we capture the combo on that keydown.
+    const heldModifiers = new Set<string>();
+    let firstModifierRdev: string | null = null;
+    let captured = false;
+
+    function isModifierCode(code: string): boolean {
+      return (
+        code === 'ControlLeft' || code === 'ControlRight' ||
+        code === 'ShiftLeft' || code === 'ShiftRight' ||
+        code === 'AltLeft' || code === 'AltRight' ||
+        code === 'MetaLeft' || code === 'MetaRight' ||
+        code === 'OSLeft' || code === 'OSRight'
+      );
+    }
+
     function handleKeyDown(e: KeyboardEvent) {
       e.preventDefault();
       e.stopPropagation();
+      if (captured) return;
 
-      // Pressing Escape with no modifiers cancels capture. Holding e.g.
-      // Shift+Escape DOES bind (cancel-with-modifier is a valid chord).
+      // Esc with no modifiers cancels capture (so users who want Esc as
+      // their cancel key just press it; users who want Shift+Esc as a
+      // combo can do that — the modifier disqualifies the cancel path).
       const noMods = !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
-      if (e.key === 'Escape' && noMods) {
+      if (e.key === 'Escape' && noMods && heldModifiers.size === 0) {
+        captured = true;
         setCapturing(false);
         setError(null);
         return;
       }
 
-      // If the user pressed only a modifier (no main key yet), wait for
-      // them to add a non-modifier — UNLESS allowBareModifiers, in which
-      // case the modifier IS a valid bare-key binding (Right Ctrl, Caps
-      // Lock, etc).
-      const isModifierKey =
-        e.code === 'ControlLeft' || e.code === 'ControlRight' ||
-        e.code === 'ShiftLeft' || e.code === 'ShiftRight' ||
-        e.code === 'AltLeft' || e.code === 'AltRight' ||
-        e.code === 'MetaLeft' || e.code === 'MetaRight' ||
-        e.code === 'OSLeft' || e.code === 'OSRight';
-      if (isModifierKey && !allowBareModifiers) {
-        // Hold the modifier and wait for the actual key — don't fire yet.
+      if (isModifierCode(e.code)) {
+        // Track the modifier as held. Don't capture YET — wait to see if
+        // a non-modifier key comes next (combo) or if the user just
+        // releases the modifier (bare-modifier bind).
+        heldModifiers.add(e.code);
+        if (firstModifierRdev === null) {
+          firstModifierRdev = browserKeyToRdev(e);
+        }
         return;
       }
 
+      // Non-modifier keydown → COMBO capture.
       const rdevName = browserKeyToRdev(e);
       if (!rdevName) {
         const codeHint = e.code ? ` (browser saw code="${e.code}")` : '';
@@ -72,15 +90,12 @@ export default function HotkeyCapture({
         return;
       }
 
-      // Build the chord string. Modifiers in canonical order: Ctrl, Shift,
-      // Alt, Meta. Skip the modifier flag for the key the user just pressed
-      // if it IS that modifier (e.g. pressing ControlRight should bind to
-      // "ControlRight", NOT to "Ctrl+ControlRight").
+      // Modifiers in canonical order: Ctrl, Shift, Alt, Meta.
       const parts: string[] = [];
-      if (e.ctrlKey && !rdevName.startsWith('Control')) parts.push('Ctrl');
-      if (e.shiftKey && !rdevName.startsWith('Shift')) parts.push('Shift');
-      if (e.altKey && rdevName !== 'Alt' && rdevName !== 'AltGr') parts.push('Alt');
-      if (e.metaKey && !rdevName.startsWith('Meta')) parts.push('Meta');
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (e.metaKey) parts.push('Meta');
       parts.push(rdevName);
       const chord = parts.join('+');
 
@@ -89,13 +104,45 @@ export default function HotkeyCapture({
         return;
       }
 
+      captured = true;
       onChange(chord);
       setCapturing(false);
       setError(null);
     }
 
+    function handleKeyUp(e: KeyboardEvent) {
+      if (captured) return;
+      if (!isModifierCode(e.code)) return;
+
+      heldModifiers.delete(e.code);
+
+      // All modifiers released without a non-modifier in between → bare-
+      // modifier bind (only honored on rows that opted in).
+      if (heldModifiers.size === 0 && firstModifierRdev !== null && allowBareModifiers) {
+        const chord = firstModifierRdev;
+        if (forbidden?.includes(chord)) {
+          setError('That key is already used by another shortcut.');
+          firstModifierRdev = null;
+          return;
+        }
+        captured = true;
+        onChange(chord);
+        setCapturing(false);
+        setError(null);
+      }
+      // If allowBareModifiers is false and they released without a key,
+      // just reset state and let them try again.
+      if (heldModifiers.size === 0) {
+        firstModifierRdev = null;
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+    };
   }, [capturing, allowBareModifiers, forbidden, onChange]);
 
   // Re-focus the button when entering capture so subsequent blur cancels it.
@@ -128,7 +175,7 @@ export default function HotkeyCapture({
           .filter(Boolean)
           .join(' ')}
       >
-        {capturing ? 'Press a key…  (Esc to cancel)' : displayName(value)}
+        {capturing ? 'Press a key or combo…  (Esc to cancel)' : displayName(value)}
       </button>
       {error && (
         <span className="text-[11px] text-[#c14a2b] dark:text-[#e87a5e] leading-tight">{error}</span>
