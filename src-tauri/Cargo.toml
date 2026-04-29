@@ -100,9 +100,13 @@ windows = { version = "0.62", features = [
 # automatically — works on Intel Macs too (with a smaller speedup) since
 # every Mac since 2012 has Metal.
 [target.'cfg(target_os = "macos")'.dependencies]
-# Mac uses Metal for the heavy lifting (encoder/decoder on the GPU). OpenMP
-# would just be a CPU fallback path — and bundling libomp on macOS is a
-# headache (it's not in the SDK; you'd need brew install libomp + carry
-# the dylib in the .app). Skip openmp here; the CPU path uses NEON SIMD
-# directly via whisper.cpp's intrinsics.
-whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "metal"] }
+# Mac CPU build for now. We HAD `metal` enabled here, but ggml-metal pulls
+# in `@available(macOS 13, *)` Objective-C runtime checks that emit
+# `__isPlatformVersionAtLeast`, a clang_rt symbol that doesn't link cleanly
+# against rust-built binaries on the GitHub macos-latest runner — we tried
+# bumping deployment target via MACOSX_* and CMAKE_OSX_* and neither
+# silenced the symbol. Shipping CPU-only Mac unblocks the team-distribution
+# goal; M-series CPU + NEON is still fast enough for usable dictation.
+# TODO: revisit Metal — likely needs explicit `-lclang_rt.osx` in RUSTFLAGS
+# or a fork of whisper-rs-sys that bumps its bundled whisper.cpp.
+whisper-rs = { version = "0.16", default-features = false, features = ["raw-api"] }
