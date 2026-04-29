@@ -4,6 +4,7 @@ import { getLicenseStatus, ping, type LicenseStatus } from '../../lib/ipc';
 import { useTheme } from '../../hooks/useTheme';
 import { UpdaterProvider, useSharedUpdater } from '../../hooks/UpdaterContext';
 import Paywall from './Paywall';
+import ReleaseNotes from './ReleaseNotes';
 import Sidebar from './Sidebar';
 import UpdateBanner from './UpdateBanner';
 import Home from './pages/Home';
@@ -33,6 +34,15 @@ function AppBody() {
   const { state: updateState, installNow, dismiss } = useSharedUpdater();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [license, setLicense] = useState<LicenseStatus | null>(null);
+  // "What's new" modal — opened from the update banner or from any other
+  // surface via the `murmr:open-release-notes` window event. Avoids
+  // prop-drilling a callback through Sidebar / Settings / etc.
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  useEffect(() => {
+    const open = () => setShowReleaseNotes(true);
+    window.addEventListener('murmr:open-release-notes', open);
+    return () => window.removeEventListener('murmr:open-release-notes', open);
+  }, []);
 
   useEffect(() => {
     ping()
@@ -48,6 +58,46 @@ function AppBody() {
   useEffect(() => {
     if (updateState.kind === 'available') setBannerDismissed(false);
   }, [updateState.kind]);
+
+  // System notification on update detected. Fires ONCE per version (tracked
+  // in localStorage) so the user isn't pinged every 6h auto-check while the
+  // banner sits there. Especially useful when the main window is hidden in
+  // the tray — without this, the user has no idea an update's waiting.
+  useEffect(() => {
+    if (updateState.kind !== 'available') return;
+    const targetVersion = updateState.version;
+    if (!targetVersion) return;
+
+    (async () => {
+      try {
+        const { isPermissionGranted, requestPermission, sendNotification } =
+          await import('@tauri-apps/plugin-notification');
+
+        const lastNotified = localStorage.getItem('murmr.lastNotifiedVersion');
+        if (lastNotified === targetVersion) return; // already pinged for this version
+
+        let granted = await isPermissionGranted();
+        if (!granted) {
+          const result = await requestPermission();
+          granted = result === 'granted';
+        }
+        if (!granted) {
+          // User denied OS notifications. Silently move on — banner is
+          // still visible inside the main window.
+          localStorage.setItem('murmr.lastNotifiedVersion', targetVersion);
+          return;
+        }
+
+        sendNotification({
+          title: 'Murmr update available',
+          body: `v${targetVersion} is ready to install. Open Murmr to update.`,
+        });
+        localStorage.setItem('murmr.lastNotifiedVersion', targetVersion);
+      } catch (e) {
+        console.warn('[updater] toast failed:', e);
+      }
+    })();
+  }, [updateState.kind, updateState.kind === 'available' ? updateState.version : null]);
 
   const showBanner =
     !bannerDismissed &&
@@ -72,6 +122,9 @@ function AppBody() {
   return (
     <HashRouter>
       <div className="h-screen flex flex-col bg-bg-window text-text-primary">
+        {showReleaseNotes && (
+          <ReleaseNotes onClose={() => setShowReleaseNotes(false)} />
+        )}
         {showBanner && (
           <UpdateBanner
             state={updateState}

@@ -21,6 +21,14 @@ export default function UpdateBanner({
           </span>
         </div>
         <button
+          onClick={() =>
+            window.dispatchEvent(new CustomEvent('murmr:open-release-notes'))
+          }
+          className="text-[12px] text-text-tertiary hover:text-text-primary px-2.5 py-1.5 underline-offset-2 hover:underline"
+        >
+          What's new
+        </button>
+        <button
           onClick={onInstall}
           className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-4 py-1.5"
         >

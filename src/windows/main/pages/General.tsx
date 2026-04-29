@@ -211,6 +211,17 @@ export default function General() {
         </button>
       </Row>
 
+      <Row name="Release notes" hint="See what's new in each Murmr version">
+        <button
+          onClick={() =>
+            window.dispatchEvent(new CustomEvent('murmr:open-release-notes'))
+          }
+          className="text-[12px] px-[14px] py-[6px] rounded-[8px] border border-border-control bg-bg-content text-text-primary font-medium hover:bg-bg-control"
+        >
+          What's new
+        </button>
+      </Row>
+
       {/* ---------- Diagnostic dictation status (Phase 5 scaffolding; trims away later) ---------- */}
       <div className="mt-10 pt-7 border-t border-border-hairline">
         <h2 className="font-serif text-[22px] text-text-primary mb-4">
