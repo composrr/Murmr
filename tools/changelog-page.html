@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Murmr — Release notes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    /*
+      Self-contained release-notes page. Future use cases:
+        1. Open via the in-app "What's new" button (file:// load)
+        2. Hosted on the marketing website (drop-in on any host)
+        3. Shared as a one-pager (HTML reads fine in email)
+
+      The page reads CHANGELOG.md from the same directory at runtime so
+      we keep ONE source of truth — the markdown file the team already
+      edits with each release.
+    */
+
+    :root {
+      --bg: #faf9f6;
+      --bg-card: #ffffff;
+      --hairline: #e2dfd7;
+      --text: #1f1f1c;
+      --muted: #767472;
+      --quaternary: #adaaa3;
+      --accent: #1f1f1c;
+      --tag-new: #4a7f3f;
+      --tag-improved: #1f5c8c;
+      --tag-fixed: #c14a2b;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1b18;
+        --bg-card: #25241f;
+        --hairline: #34322c;
+        --text: #e9e7e0;
+        --muted: #8e8a82;
+        --quaternary: #5d5b56;
+        --accent: #d4d4cf;
+        --tag-new: #93c98a;
+        --tag-improved: #7eb1da;
+        --tag-fixed: #e87a5e;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 56px 28px 96px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 6px;
+    }
+    .logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+    }
+    .logo svg { width: 28px; height: 28px; }
+    h1 {
+      font-family: "Source Serif 4", "Source Serif Pro", Cambria, Georgia, serif;
+      font-weight: 400;
+      font-size: 38px;
+      letter-spacing: -0.6px;
+      margin: 0;
+      line-height: 1.1;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 4px 0 36px;
+    }
+
+    section.release {
+      background: var(--bg-card);
+      border: 1px solid var(--hairline);
+      border-radius: 16px;
+      padding: 22px 26px;
+      margin-bottom: 18px;
+    }
+    section.release.unreleased {
+      background: transparent;
+      border-style: dashed;
+    }
+    .release-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    h2 {
+      font-family: "Source Serif 4", "Source Serif Pro", Cambria, Georgia, serif;
+      font-weight: 400;
+      font-size: 22px;
+      letter-spacing: -0.3px;
+      margin: 0;
+    }
+    .date { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .tagline {
+      color: var(--muted);
+      font-size: 13px;
+      margin: -8px 0 14px;
+    }
+
+    h3 {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 16px 0 8px;
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      h3 { background: rgba(255,255,255,0.06); }
+    }
+    h3.New { color: var(--tag-new); }
+    h3.Improved { color: var(--tag-improved); }
+    h3.Fixed { color: var(--tag-fixed); }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 4px 0;
+    }
+    li {
+      padding: 5px 0 5px 18px;
+      position: relative;
+      color: var(--text);
+      font-size: 14px;
+    }
+    li::before {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 12px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--quaternary);
+    }
+    li code, p code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12.5px;
+      background: rgba(0,0,0,0.05);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    @media (prefers-color-scheme: dark) {
+      li code, p code { background: rgba(255,255,255,0.07); }
+    }
+
+    .loading, .error {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 24px;
+      text-align: center;
+    }
+    .error { color: var(--tag-fixed); }
+
+    footer {
+      margin-top: 48px;
+      color: var(--quaternary);
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <g transform="translate(24, 24)">
+          <rect x="-8" y="-17" width="16" height="22" rx="8" fill="#fafaf9" />
+          <path d="M -13 4 Q -13 17 0 17 Q 13 17 13 4" fill="none" stroke="#fafaf9" stroke-width="3" stroke-linecap="round" />
+          <line x1="0" y1="17" x2="0" y2="24" stroke="#fafaf9" stroke-width="3" stroke-linecap="round" />
+        </g>
+      </svg>
+    </div>
+    <h1>Release notes</h1>
+  </header>
+  <p class="sub">Every change shipped to Murmr, in reverse chronological order.</p>
+
+  <div id="content" class="loading">Loading changelog…</div>
+
+  <footer>
+    Source: <code>CHANGELOG.md</code> · <a href="https://github.com/composrr/Murmr" style="color:inherit">github.com/composrr/Murmr</a>
+  </footer>
+</div>
+
+<script>
+'use strict';
+
+// Tiny, dependency-free Markdown → HTML for the limited grammar we use in
+// CHANGELOG.md (h2, h3, lists, code spans, links). Not a general parser —
+// don't use elsewhere.
+function renderChangelog(md) {
+  // Drop everything before the first ## release header (the prose intro).
+  const idx = md.indexOf('\n## ');
+  const body = idx >= 0 ? md.slice(idx + 1) : md;
+
+  // Split on ## headers — each chunk = one release.
+  const chunks = body.split(/\n(?=## )/);
+  const html = [];
+
+  for (const chunk of chunks) {
+    const lines = chunk.split('\n');
+    const head = lines.shift() || '';
+    if (!head.startsWith('## ')) continue;
+
+    // Parse heading: "## v0.1.17 — 2026-04-29 — first public release"
+    const headRest = head.slice(3).trim();
+    const isUnreleased = /^\[?Unreleased\]?$/i.test(headRest);
+    let title, date, tagline;
+    if (isUnreleased) {
+      title = 'Unreleased';
+      date = '';
+      tagline = '';
+    } else {
+      const parts = headRest.split('—').map((s) => s.trim());
+      title = parts[0] || headRest;
+      date = parts[1] || '';
+      tagline = parts.slice(2).join(' — ');
+    }
+
+    let inner = '';
+    let listItems = [];
+    let pendingH3 = null;
+
+    function flushList() {
+      if (listItems.length) {
+        inner += '<ul>' + listItems.map((li) => '<li>' + inlineMd(li) + '</li>').join('') + '</ul>';
+        listItems = [];
+      }
+    }
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      // Blockquote (italic intro paragraph for Unreleased)
+      if (trimmed.startsWith('_') && trimmed.endsWith('_')) {
+        flushList();
+        inner += '<p style="color:var(--muted); font-style:italic; font-size:13px; margin:6px 0 14px">' +
+                 inlineMd(trimmed.slice(1, -1)) + '</p>';
+        continue;
+      }
+
+      // h3: "### New" / "### Improved" / "### Fixed"
+      if (trimmed.startsWith('### ')) {
+        flushList();
+        pendingH3 = trimmed.slice(4).trim();
+        inner += '<h3 class="' + pendingH3.replace(/\W+/g, '') + '">' + pendingH3 + '</h3>';
+        continue;
+      }
+
+      // List item
+      if (trimmed.startsWith('- ')) {
+        listItems.push(trimmed.slice(2));
+        continue;
+      }
+
+      // Continuation of previous list item (indented)
+      if (listItems.length && /^[\s]+\S/.test(line)) {
+        listItems[listItems.length - 1] += ' ' + trimmed;
+        continue;
+      }
+    }
+    flushList();
+
+    html.push(
+      '<section class="release' + (isUnreleased ? ' unreleased' : '') + '">' +
+        '<div class="release-head">' +
+          '<h2>' + title + '</h2>' +
+          (date ? '<span class="date">' + date + '</span>' : '') +
+        '</div>' +
+        (tagline ? '<p class="tagline">' + tagline + '</p>' : '') +
+        inner +
+      '</section>'
+    );
+  }
+
+  return html.join('');
+}
+
+function inlineMd(s) {
+  // Escape HTML first, then add code spans + links.
+  let out = s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  // **bold**
+  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // `code`
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // [text](url)
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  return out;
+}
+
+async function load() {
+  const target = document.getElementById('content');
+  try {
+    // Same-directory CHANGELOG.md. When this page lives next to the file
+    // (in the repo or on the website), no path needed.
+    const r = await fetch('CHANGELOG.md');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const md = await r.text();
+    target.className = '';
+    target.innerHTML = renderChangelog(md);
+  } catch (e) {
+    target.className = 'error';
+    target.textContent =
+      'Could not load CHANGELOG.md (' + (e.message || e) +
+      '). Make sure this file is opened over http:// or alongside CHANGELOG.md.';
+  }
+}
+
+load();
+</script>
+</body>
+</html>

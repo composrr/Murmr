@@ -125,11 +125,26 @@ export function useUpdater(autoCheck = true) {
   useEffect(() => {
     if (!autoCheck || checkedOnceRef.current) return;
     checkedOnceRef.current = true;
-    // Defer the first check so it doesn't fight model loading.
-    const id = setTimeout(() => {
+
+    // First check: 4 sec after mount (so it doesn't fight model loading).
+    const initial = setTimeout(() => {
       checkNow().catch(() => {});
     }, 4000);
-    return () => clearTimeout(id);
+
+    // Periodic re-check every 6 hours so a long-running session catches
+    // updates without requiring a relaunch. Six hours is roughly a half-day
+    // — frequent enough that you don't fall too far behind, infrequent
+    // enough that we don't slam the GitHub Releases CDN with thousands of
+    // installs every minute.
+    const PERIODIC_MS = 6 * 60 * 60 * 1000;
+    const periodic = setInterval(() => {
+      checkNow().catch(() => {});
+    }, PERIODIC_MS);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(periodic);
+    };
   }, [autoCheck, checkNow]);
 
   return { state, checkNow, installNow, dismiss };
