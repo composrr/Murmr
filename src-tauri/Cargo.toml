@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.22"
+version = "0.1.23"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"
@@ -72,12 +72,6 @@ parking_lot = "0.12"
 thiserror = "2"
 crossbeam-channel = "0.5"
 regex = "1"
-
-# License signing — Ed25519 over a JSON payload. Each license key is a
-# base64-encoded `{ payload_json }.{ signature_b64 }` pair. The app holds
-# only the public key; the matching private key lives offline.
-ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-base64 = "0.22"
 
 # Win32 APIs for HUD positioning (focus module).
 # - windows-sys: lightweight legacy bindings (GetGUIThreadInfo, GetForegroundWindow)
