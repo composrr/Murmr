@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.25"
+version = "0.1.26"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"
@@ -39,11 +39,7 @@ serde_json = "1"
 cpal = "0.15"
 rubato = "0.16"
 hound = "3.5"
-# `playback` is what wires cpal up as rodio's audio backend. It's a default
-# feature, but we have `default-features = false` to slim deps, so we need
-# to opt back in explicitly. Without it `OutputStream::try_default()`
-# returns Err and every UI sound silently no-ops.
-rodio = { version = "0.20", default-features = false, features = ["wav", "playback"] }
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
 
 # Local Whisper transcription.
 # - `raw-api` re-exports whisper-rs-sys so we can hook ggml's own logging
