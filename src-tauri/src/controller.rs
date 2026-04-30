@@ -28,6 +28,7 @@ use crate::license;
 use crate::focus;
 use crate::hotkey::HotkeyEvent;
 use crate::injector;
+use crate::perf_log;
 use crate::settings::SettingsStore;
 use crate::sounds::SoundPlayer;
 use crate::transcribe::{self, Transcriber};
@@ -48,11 +49,14 @@ const RMS_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 /// nothing in the captured audio crosses this, we skip Whisper to avoid
 /// "Thanks for watching!" hallucinations from quiet rooms.
 ///
-/// Mac builds use a more permissive threshold to match the HUD's word counter
-/// (which uses 0.004); built-in MacBook mics record significantly quieter
-/// than the headset/desktop mics this was originally tuned for.
+/// Mac builds use a much more permissive threshold. Built-in MacBook mics
+/// record significantly quieter than the headset/desktop mics this was
+/// originally tuned for — typical Mac speech-level RMS lands in the 0.001-0.01
+/// range vs 0.02-0.1 on Windows. Whisper handles near-silent audio fine; the
+/// occasional empty-room hallucination is a smaller cost than missing real
+/// speech.
 #[cfg(target_os = "macos")]
-const VAD_RMS_THRESHOLD: f32 = 0.004;
+const VAD_RMS_THRESHOLD: f32 = 0.001;
 #[cfg(not(target_os = "macos"))]
 const VAD_RMS_THRESHOLD: f32 = 0.015;
 
@@ -312,6 +316,16 @@ impl Controller {
 
         // Energy-based VAD — bail out before invoking Whisper on silence.
         if !has_speech(&cap.samples, cap.sample_rate, VAD_RMS_THRESHOLD) {
+            // Log the peak chunk RMS so users hitting silent failures can
+            // see whether their mic is producing audio that's just below
+            // threshold — informs the next round of threshold tuning.
+            let peak = peak_chunk_rms(&cap.samples, cap.sample_rate);
+            perf_log::append(&format!(
+                "[ctrl] VAD rejected: {} samples, peak chunk RMS {:.4} (threshold {:.4})",
+                cap.samples.len(),
+                peak,
+                VAD_RMS_THRESHOLD
+            ));
             self.emit(Status::Cancelled);
             self.hide_hud();
             return;
@@ -521,6 +535,20 @@ fn has_speech(samples: &[f32], sample_rate: u32, threshold: f32) -> bool {
         })
         .count();
     speech_chunks >= VAD_MIN_SPEECH_CHUNKS
+}
+
+/// Loudest 100ms-chunk RMS in the recording. Used in the VAD-bail log so
+/// users hitting silent failures can see whether their mic is just below
+/// threshold (informs whether to lower it further).
+fn peak_chunk_rms(samples: &[f32], sample_rate: u32) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let chunk = (sample_rate as usize / 10).max(1);
+    samples
+        .chunks(chunk)
+        .map(|b| (b.iter().map(|&s| s * s).sum::<f32>() / b.len() as f32).sqrt())
+        .fold(0.0_f32, f32::max)
 }
 
 fn position_hud_bottom_center(hud: &tauri::WebviewWindow) -> Result<(), String> {
