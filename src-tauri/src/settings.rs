@@ -76,11 +76,6 @@ pub struct Settings {
     /// What the user wants to be called in greetings. Empty falls back to
     /// the OS user's display name.
     pub display_name: String,
-
-    /// User-entered license key. Empty until first paid activation; the
-    /// `license` module validates this against the bundled Ed25519 public
-    /// key on every startup. Empty / invalid → paywall screen.
-    pub license_key: String,
 }
 
 impl Default for Settings {
@@ -136,7 +131,6 @@ impl Default for Settings {
 
             has_completed_onboarding: false,
             display_name: String::new(),
-            license_key: String::new(),
         }
     }
 }

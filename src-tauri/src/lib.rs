@@ -5,7 +5,6 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
-mod license;
 mod perf_log;
 mod settings;
 mod sounds;
@@ -259,25 +258,6 @@ fn update_dictionary_entry(
 #[tauri::command]
 fn delete_dictionary_entry(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     state.db.delete_dictionary_entry(id)
-}
-
-// ----- License -----
-
-#[tauri::command]
-fn license_status(state: State<'_, AppState>) -> license::LicenseStatus {
-    let key = state.settings.get().license_key;
-    license::validate(&key, &license::now_iso_z())
-}
-
-#[tauri::command]
-fn set_license_key(
-    key: String,
-    state: State<'_, AppState>,
-) -> Result<license::LicenseStatus, String> {
-    let mut s = state.settings.get();
-    s.license_key = key.trim().to_string();
-    state.settings.replace(s)?;
-    Ok(license_status(state))
 }
 
 // ----- Settings -----
@@ -875,8 +855,6 @@ pub fn run() {
             create_dictionary_entry,
             update_dictionary_entry,
             delete_dictionary_entry,
-            license_status,
-            set_license_key,
             get_settings,
             save_settings,
             list_input_devices,

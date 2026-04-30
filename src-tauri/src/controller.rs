@@ -24,7 +24,6 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 use crate::audio::{self, Recorder};
 use crate::audio_duck;
 use crate::db::Db;
-use crate::license;
 use crate::focus;
 use crate::hotkey::HotkeyEvent;
 use crate::injector;
@@ -133,22 +132,7 @@ impl Controller {
         let mut press_at: Option<Instant> = None;
 
         while let Ok(ev) = rx.recv() {
-            // License gate: refuse to start a recording (or honor the
-            // re-paste shortcut) if we don't have a valid license. The
-            // paywall window in the frontend covers the IPC side; this
-            // covers the global hotkey side so the only way to dictate
-            // is with a paid key.
-            if matches!(
-                ev,
-                HotkeyEvent::DictationDown | HotkeyEvent::RepeatLast
-            ) && !self.is_licensed()
-            {
-                self.emit(Status::Error {
-                    message: "Murmr needs a license key — open the main window to enter one.".into(),
-                });
-                continue;
-            }
-
+            // License gate removed in v0.1.23 — Murmr is free for anyone.
             match (ev, state) {
                 (HotkeyEvent::DictationDown, RecState::Idle) => {
                     if let Err(e) = self.start_recording() {
@@ -238,15 +222,6 @@ impl Controller {
                 );
             })
             .expect("failed to spawn re-paste thread");
-    }
-
-    /// Cheap license check on every press cycle — Ed25519 verify of a
-    /// ~100-byte signature is sub-millisecond and irrelevant to overall
-    /// latency. Doing it lazily means a key that was just entered via the
-    /// paywall takes effect on the very next keypress.
-    fn is_licensed(&self) -> bool {
-        let key = self.settings.get().license_key;
-        license::validate(&key, &license::now_iso_z()).is_valid()
     }
 
     fn start_recording(&self) -> Result<(), String> {

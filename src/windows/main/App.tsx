@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { getLicenseStatus, ping, type LicenseStatus } from '../../lib/ipc';
+import { ping } from '../../lib/ipc';
 import { useTheme } from '../../hooks/useTheme';
 import { UpdaterProvider, useSharedUpdater } from '../../hooks/UpdaterContext';
-import Paywall from './Paywall';
 import ReleaseNotes from './ReleaseNotes';
 import Sidebar from './Sidebar';
 import UpdateBanner from './UpdateBanner';
@@ -33,7 +32,6 @@ function AppBody() {
   const [version, setVersion] = useState('0.1.0');
   const { state: updateState, installNow, dismiss } = useSharedUpdater();
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [license, setLicense] = useState<LicenseStatus | null>(null);
   // "What's new" modal — opened from the update banner or from any other
   // surface via the `murmr:open-release-notes` window event. Avoids
   // prop-drilling a callback through Sidebar / Settings / etc.
@@ -48,10 +46,6 @@ function AppBody() {
     ping()
       .then((p) => setVersion(p.version))
       .catch(() => {});
-    // License check is gating — don't show ANYTHING until we know.
-    getLicenseStatus()
-      .then(setLicense)
-      .catch((e) => setLicense({ kind: 'malformed', reason: String(e) }));
   }, []);
 
   // Re-show the banner if a new version arrives after a previous dismissal.
@@ -105,19 +99,6 @@ function AppBody() {
       updateState.kind === 'downloading' ||
       updateState.kind === 'ready' ||
       updateState.kind === 'error');
-
-  // Initial license fetch hasn't returned yet — render nothing rather than
-  // flash the main UI for a frame.
-  if (license === null) {
-    return <div className="h-screen bg-bg-window" />;
-  }
-
-  // No license / invalid → paywall instead of main UI. The paywall is
-  // self-contained (no router, no sidebar) and calls onLicensed when the
-  // user pastes a valid key.
-  if (license.kind !== 'valid') {
-    return <Paywall status={license} onLicensed={setLicense} />;
-  }
 
   return (
     <HashRouter>

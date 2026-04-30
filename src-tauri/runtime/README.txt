@@ -9,10 +9,10 @@ typing. Audio NEVER leaves your machine — no cloud, no telemetry.
 First run
 ---------
 
-1. Murmr launches a small main window. Activate it with the license key from
-   your purchase email (paste in the box, click Activate).
-2. After activation, Murmr lives in your system tray (taskbar bottom-right).
-   Closing the window keeps it running quietly.
+1. Murmr launches the main window — no signup, no key, no account. It's
+   free.
+2. Murmr lives in your system tray (taskbar bottom-right). Closing the
+   main window keeps it running quietly.
 3. Default hotkey: TAP "Right Ctrl" to start dictating, TAP again to stop.
    HOLD "Right Ctrl" for push-to-talk (release to stop).
 
@@ -83,10 +83,8 @@ Trouble?
     make sure the target app has focus when you stop dictating.
 
 
-Source + license keys
----------------------
+Source
+------
 
-This is a personal-team beta build. To request a license key or report a
-bug, contact the person who shared this with you.
-
-Source: https://github.com/composrr/Murmr
+Murmr is free for anyone. Public source at:
+https://github.com/composrr/Murmr

@@ -198,24 +198,6 @@ export interface Settings {
   force_cpu: boolean;
   has_completed_onboarding: boolean;
   display_name: string;
-  license_key: string;
-}
-
-// ----- License -----
-
-export type LicenseStatus =
-  | { kind: 'missing' }
-  | { kind: 'malformed'; reason: string }
-  | { kind: 'bad-signature' }
-  | { kind: 'expired'; email: string; expired_at: string }
-  | { kind: 'valid'; email: string; tier: string | null; expires_at: string | null };
-
-export function getLicenseStatus(): Promise<LicenseStatus> {
-  return invoke<LicenseStatus>('license_status');
-}
-
-export function setLicenseKey(key: string): Promise<LicenseStatus> {
-  return invoke<LicenseStatus>('set_license_key', { key });
 }
 
 export function getSettings(): Promise<Settings> {

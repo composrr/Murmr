@@ -217,37 +217,7 @@ function loadLocalSigningKey() {
 
 loadLocalSigningKey();
 
-// ---------------------------------------------------------------------------
-// License-validation public key — baked into the binary via build env var.
-// Generated once with `node scripts/issue-license.mjs --init` (which writes
-// the matching private key to .keys/license-priv.key, gitignored).
-// ---------------------------------------------------------------------------
-function loadLocalLicensePubkey() {
-  if (env.MURMR_LICENSE_PUBKEY) return; // explicit override (CI)
-  const path = join('.keys', 'license-pub.key');
-  if (!existsSync(path)) {
-    // Soft-warn: the binary will still build, but EVERY license key will
-    // be rejected as "this build was compiled without MURMR_LICENSE_PUBKEY".
-    console.warn(
-      '[run-tauri] no .keys/license-pub.key — license validation will reject all keys.',
-    );
-    console.warn(
-      '[run-tauri] Run `node scripts/issue-license.mjs --init` to generate one.',
-    );
-    return;
-  }
-  try {
-    const key = readFileSync(path, 'utf8').trim();
-    if (key) {
-      extraEnv.MURMR_LICENSE_PUBKEY = key;
-      console.log(`[run-tauri] baked license pubkey from ${path}`);
-    }
-  } catch (e) {
-    console.warn(`[run-tauri] failed to read license pubkey: ${e.message}`);
-  }
-}
-
-loadLocalLicensePubkey();
+// (License pubkey loader removed in v0.1.23 — Murmr is free, no key check.)
 
 const PATH = [...newPath, env.PATH].join(platform === 'win32' ? ';' : ':');
 

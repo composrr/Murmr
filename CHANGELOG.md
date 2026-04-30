@@ -14,14 +14,73 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+---
+
+## v0.1.23 — Murmr is free
+
 ### New
 
-- README.txt now ships next to the installed app (Windows install dir or
+- **Murmr is now free for anyone.** No license key, no paywall, no signup.
+  The whole licensing surface (paywall screen, key generator, Ed25519
+  validation, settings field) is gone. Your existing license keys keep
+  installing fine but they aren't checked anymore.
+
+### Improved
+
+- Smaller binary — dropped `ed25519-dalek` + `base64` dependencies along
+  with the license module.
+- Faster cold start — no license-check on every dictation press cycle.
+
+---
+
+## v0.1.22 — macOS 26 fixes
+
+### Fixed
+
+- **macOS 26 first-keystroke crash** — vendored `rdev` to skip the
+  `TSMGetInputSourceProperty` call inside its `CGEventTap` callback,
+  which was firing `dispatch_assert_queue` on a non-main thread and
+  killing the app the moment any key was pressed.
+- macOS focus detection (`focus/macos.rs`) — reads the focused text
+  field's AXUIElement so the HUD lands near the input.
+- macOS VAD threshold lowered from 0.015 → 0.001 (MacBook built-in mics
+  record significantly quieter than the headset/desktop mics this was
+  originally tuned for).
+- Transparent HUD on macOS via `tauri/macos-private-api` feature.
+
+---
+
+## v0.1.21 — Tagged correctly
+
+### Fixed
+
+- Version mismatch from v0.1.20: tag landed on a commit where source still
+  said "0.1.18" so CI built and uploaded mismatched binaries.
+- `release-beta.mjs` now auto-commits the version bump before you can tag,
+  so the source version always matches the tag.
+
+---
+
+## v0.1.20 — In-app changelog (BROKEN — withdrawn)
+
+This release was published then immediately withdrawn — Windows installers
+were misnamed and would have caused an OTA update loop. Use v0.1.21 or
+later. (Notes preserved for completeness.)
+
+### New
+
+- README.txt ships next to the installed app (Windows install dir or
   macOS .app/Contents/Resources). Plain English: hotkeys, settings tour,
   privacy policy, troubleshooting.
-- Updater also re-checks every 6 hours during a long-running session, in
-  addition to the launch-time check. Long-lived Murmr instances catch new
-  versions without needing a relaunch.
+- Updater re-checks every 6 hours during a long-running session, in
+  addition to the launch-time check.
+- System toast notification when an update is detected (Windows / macOS
+  native), so users in tray-only mode see updates without opening the app.
+- In-app **What's new** modal — fetches `CHANGELOG.md` from GitHub and
+  renders it brand-styled. Open from the update banner or
+  Settings → General → Release notes.
+- Self-contained styled HTML changelog page at `tools/changelog-page.html`
+  for the future marketing site.
 
 ---
 
