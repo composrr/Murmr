@@ -14,6 +14,13 @@ export type UpdaterState =
     }
   | { kind: 'downloading'; downloaded: number; total: number | null }
   | { kind: 'ready' }
+  /** A network/parse failure during a `check()` call. Kept distinct from
+   * install errors so the UI can be quiet about it (auto-checks fire on
+   * every launch and on a timer; one transient failure shouldn't slap a
+   * red banner across the top of the window). */
+  | { kind: 'check-failed'; message: string }
+  /** An error during the actual download/install. The user is actively
+   * waiting for this, so it warrants a visible error. */
   | { kind: 'error'; message: string };
 
 /// Manages auto-update state. Background-checks once on mount (after a brief
@@ -59,7 +66,7 @@ export function useUpdater(autoCheck = true) {
       }
     } catch (e) {
       console.error('[updater] check failed:', e);
-      setState({ kind: 'error', message: String(e) });
+      setState({ kind: 'check-failed', message: String(e) });
     }
   }, []);
 
@@ -118,11 +125,26 @@ export function useUpdater(autoCheck = true) {
   useEffect(() => {
     if (!autoCheck || checkedOnceRef.current) return;
     checkedOnceRef.current = true;
-    // Defer the first check so it doesn't fight model loading.
-    const id = setTimeout(() => {
+
+    // First check: 4 sec after mount (so it doesn't fight model loading).
+    const initial = setTimeout(() => {
       checkNow().catch(() => {});
     }, 4000);
-    return () => clearTimeout(id);
+
+    // Periodic re-check every 6 hours so a long-running session catches
+    // updates without requiring a relaunch. Six hours is roughly a half-day
+    // — frequent enough that you don't fall too far behind, infrequent
+    // enough that we don't slam the GitHub Releases CDN with thousands of
+    // installs every minute.
+    const PERIODIC_MS = 6 * 60 * 60 * 1000;
+    const periodic = setInterval(() => {
+      checkNow().catch(() => {});
+    }, PERIODIC_MS);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(periodic);
+    };
   }, [autoCheck, checkNow]);
 
   return { state, checkNow, installNow, dismiss };

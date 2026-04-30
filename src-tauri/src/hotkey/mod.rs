@@ -1,43 +1,69 @@
-//! Global keyboard hotkey listener.
+//! Global keyboard hotkey listener with chord support.
 //!
-//! Uses `rdev::grab` (low-level platform keyboard hook with suppression).
-//! Bound keys (dictation, repeat, cancel) are CONSUMED — they don't reach
-//! the focused app — so binding to e.g. `~` or `K` doesn't paint the
-//! character into whatever input has focus on every press.
+//! Each binding is a *chord*: zero or more modifiers (Ctrl/Shift/Alt/Meta)
+//! plus exactly one main key. So you can bind dictation to a bare key
+//! (`F8`, `CapsLock`, `~`), a modifier-letter combo (`Ctrl+Shift+V`), or
+//! anything in between.
 //!
-//! Why not `rdev::listen`? It's observation-only — events still reach the
-//! focused app. Why not `tauri-plugin-global-shortcut`? It doesn't fire
-//! on bare modifier keys (Right Ctrl, etc.), which is the canonical Murmr
-//! ergonomic.
+//! Match policy is **strict** — `Shift+V` does NOT fire when the user
+//! presses `Ctrl+Shift+V`, because the extra Ctrl modifier disqualifies it.
+//! Lenient matching invites accidental triggers from ordinary app shortcuts.
 //!
-//! ## Runtime configuration
-//!
-//! Bindings live in a global `Arc<RwLock<HotkeyConfig>>` populated at
-//! startup from `Settings`. The Settings page calls `update_config(...)`
-//! to swap them live without restarting the listener thread (rdev's grab
-//! blocks forever and can't be woken).
+//! We use `rdev::grab` so the main key (and only the main key) is consumed —
+//! modifiers always pass through normally so things like Ctrl-selection in
+//! the focused app keep working.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use parking_lot::RwLock;
 use rdev::{grab, Event, EventType, Key};
 
+// ---------------------------------------------------------------------------
+// Chord type — modifiers + main key
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModifierSet {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+impl ModifierSet {
+    fn empty(&self) -> bool {
+        !(self.ctrl || self.shift || self.alt || self.meta)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Chord {
+    pub modifiers: ModifierSet,
+    pub key: Key,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct HotkeyConfig {
-    pub dictation: Key,
-    /// Standalone re-paste key. `None` disables the re-paste shortcut
-    /// entirely (the user can still re-paste from the History page).
-    pub repeat: Option<Key>,
-    pub cancel: Key,
+    pub dictation: Chord,
+    /// `None` disables the re-paste shortcut entirely.
+    pub repeat: Option<Chord>,
+    pub cancel: Chord,
 }
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {
-            dictation: Key::ControlRight,
+            dictation: Chord {
+                modifiers: ModifierSet::default(),
+                key: Key::ControlRight,
+            },
             repeat: None,
-            cancel: Key::Escape,
+            cancel: Chord {
+                modifiers: ModifierSet::default(),
+                key: Key::Escape,
+            },
         }
     }
 }
@@ -47,39 +73,62 @@ pub enum HotkeyEvent {
     DictationDown,
     DictationUp,
     EscDown,
-    /// User pressed the standalone re-paste key. The controller re-injects
-    /// the most recent transcription.
     RepeatLast,
 }
 
-// --- Global config + helpers -----------------------------------------------
+// ---------------------------------------------------------------------------
+// String <-> Chord serialization
+// ---------------------------------------------------------------------------
 
-static CONFIG: parking_lot::Mutex<Option<Arc<RwLock<HotkeyConfig>>>> =
-    parking_lot::Mutex::new(None);
+/// Parse a chord like "Ctrl+Shift+KeyV", "F8", or "ControlRight".
+/// Modifiers (in any order): "Ctrl", "Shift", "Alt", "Meta".
+/// Returns None if the string has no valid main key (modifier-only chords
+/// aren't allowed — except ControlRight etc which ARE main keys despite
+/// being a modifier physically).
+pub fn parse_chord(s: &str) -> Option<Chord> {
+    let mut modifiers = ModifierSet::default();
+    let mut main_key: Option<Key> = None;
 
-fn config_handle() -> Arc<RwLock<HotkeyConfig>> {
-    let mut guard = CONFIG.lock();
-    if let Some(c) = guard.as_ref() {
-        return Arc::clone(c);
+    for raw in s.split('+') {
+        let part = raw.trim();
+        if part.is_empty() {
+            continue;
+        }
+        match part {
+            "Ctrl" => modifiers.ctrl = true,
+            "Shift" => modifiers.shift = true,
+            "Alt" => modifiers.alt = true,
+            "Meta" => modifiers.meta = true,
+            other => {
+                if main_key.is_some() {
+                    return None; // two non-modifier keys — invalid
+                }
+                main_key = parse_key(other);
+            }
+        }
     }
-    let cfg = Arc::new(RwLock::new(HotkeyConfig::default()));
-    *guard = Some(Arc::clone(&cfg));
-    cfg
+
+    main_key.map(|k| Chord {
+        modifiers,
+        key: k,
+    })
 }
 
-/// Hot-swap the listener's bound keys. Called from the IPC layer after the
-/// user saves a new key in Settings.
-pub fn update_config(new_config: HotkeyConfig) {
-    let handle = config_handle();
-    *handle.write() = new_config;
+/// Build a `HotkeyConfig` from raw setting strings, falling back to the
+/// defaults for any field that doesn't parse. Empty `repeat` = disabled.
+pub fn config_from_strings(dictation: &str, repeat: &str, cancel: &str) -> HotkeyConfig {
+    let defaults = HotkeyConfig::default();
+    HotkeyConfig {
+        dictation: parse_chord(dictation).unwrap_or(defaults.dictation),
+        repeat: parse_chord(repeat),
+        cancel: parse_chord(cancel).unwrap_or(defaults.cancel),
+    }
 }
 
-/// Parse a key name from settings (matches `format!("{:?}", Key::*)`) into
-/// an rdev::Key. Returns `None` on unknown / empty names so callers can
-/// keep the previous binding (or treat as "disabled").
-pub fn parse_key(name: &str) -> Option<Key> {
+/// Parse a key name from rdev's Debug spelling.
+fn parse_key(name: &str) -> Option<Key> {
     match name {
-        // Modifiers
+        // Modifiers (also valid as main keys for bare-modifier hotkeys)
         "Alt" => Some(Key::Alt),
         "AltGr" => Some(Key::AltGr),
         "ControlLeft" => Some(Key::ControlLeft),
@@ -123,7 +172,7 @@ pub fn parse_key(name: &str) -> Option<Key> {
         "F10" => Some(Key::F10),
         "F11" => Some(Key::F11),
         "F12" => Some(Key::F12),
-        // Top-row numbers (rdev names them Num0..Num9, NOT Digit0..)
+        // Digits
         "Num0" => Some(Key::Num0),
         "Num1" => Some(Key::Num1),
         "Num2" => Some(Key::Num2),
@@ -161,7 +210,7 @@ pub fn parse_key(name: &str) -> Option<Key> {
         "KeyX" => Some(Key::KeyX),
         "KeyY" => Some(Key::KeyY),
         "KeyZ" => Some(Key::KeyZ),
-        // Symbols on the main row
+        // Symbols
         "BackQuote" => Some(Key::BackQuote),
         "Minus" => Some(Key::Minus),
         "Equal" => Some(Key::Equal),
@@ -195,29 +244,77 @@ pub fn parse_key(name: &str) -> Option<Key> {
     }
 }
 
-/// Build a `HotkeyConfig` from raw setting strings. Empty `repeat` =
-/// disabled. Falls back to defaults for fields that don't parse.
-pub fn config_from_strings(dictation: &str, repeat: &str, cancel: &str) -> HotkeyConfig {
-    let defaults = HotkeyConfig::default();
-    HotkeyConfig {
-        dictation: parse_key(dictation).unwrap_or(defaults.dictation),
-        repeat: parse_key(repeat),
-        cancel: parse_key(cancel).unwrap_or(defaults.cancel),
+// ---------------------------------------------------------------------------
+// Global config + helpers
+// ---------------------------------------------------------------------------
+
+static CONFIG: parking_lot::Mutex<Option<Arc<RwLock<HotkeyConfig>>>> =
+    parking_lot::Mutex::new(None);
+
+fn config_handle() -> Arc<RwLock<HotkeyConfig>> {
+    let mut guard = CONFIG.lock();
+    if let Some(c) = guard.as_ref() {
+        return Arc::clone(c);
+    }
+    let cfg = Arc::new(RwLock::new(HotkeyConfig::default()));
+    *guard = Some(Arc::clone(&cfg));
+    cfg
+}
+
+pub fn update_config(new_config: HotkeyConfig) {
+    let handle = config_handle();
+    *handle.write() = new_config;
+}
+
+// ---------------------------------------------------------------------------
+// Listener
+// ---------------------------------------------------------------------------
+
+#[derive(Default, Clone)]
+struct ModifierState {
+    shift: Arc<AtomicBool>,
+    ctrl: Arc<AtomicBool>,
+    alt: Arc<AtomicBool>,
+    meta: Arc<AtomicBool>,
+}
+
+impl ModifierState {
+    fn snapshot(&self) -> ModifierSet {
+        ModifierSet {
+            ctrl: self.ctrl.load(Ordering::Relaxed),
+            shift: self.shift.load(Ordering::Relaxed),
+            alt: self.alt.load(Ordering::Relaxed),
+            meta: self.meta.load(Ordering::Relaxed),
+        }
+    }
+
+    fn apply(&self, ev: &EventType) {
+        let (key, pressed) = match ev {
+            EventType::KeyPress(k) => (*k, true),
+            EventType::KeyRelease(k) => (*k, false),
+            _ => return,
+        };
+        match key {
+            Key::ShiftLeft | Key::ShiftRight => self.shift.store(pressed, Ordering::Relaxed),
+            Key::ControlLeft | Key::ControlRight => self.ctrl.store(pressed, Ordering::Relaxed),
+            Key::Alt | Key::AltGr => self.alt.store(pressed, Ordering::Relaxed),
+            Key::MetaLeft | Key::MetaRight => self.meta.store(pressed, Ordering::Relaxed),
+            _ => {}
+        }
     }
 }
 
-// --- Listener thread -------------------------------------------------------
-
-/// Spawn a dedicated OS-thread that runs `rdev::grab` and forwards hotkey
-/// events to the supplied sender. `rdev::grab` blocks forever, so it must
-/// own its own thread.
+/// Spawn the OS keyboard hook thread. Bindings come from `initial_config`
+/// and can be hot-swapped via `update_config(...)` without restarting.
 ///
-/// Cost: `grab` runs in the OS keyboard hook hot path (every key the user
-/// types). Our callback is ~microseconds (one RwLock read + a channel
-/// send), so latency added to normal typing is unmeasurable.
+/// Suppression rule: only the *main key* of a matched chord is consumed.
+/// Modifiers always pass through normally — otherwise binding to
+/// `Ctrl+Shift+V` would break every app's normal Ctrl handling.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     *config_handle().write() = initial_config;
 
+    let modifiers = ModifierState::default();
+    let mods_for_cb = modifiers.clone();
     let cfg_for_cb = config_handle();
 
     std::thread::Builder::new()
@@ -226,30 +323,52 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
             let result = grab(move |event: Event| -> Option<Event> {
                 let cfg = *cfg_for_cb.read();
 
-                // Decide if this event is one of ours, AND whether to
-                // suppress it (so it doesn't ALSO reach the focused app).
+                // Snapshot modifier state PRIOR to applying this event so
+                // chords with bare-modifier main keys (e.g. main = ControlRight,
+                // expected modifiers = Ctrl) don't self-trigger when the user
+                // presses ControlRight (which IS a Ctrl press but we want to
+                // see "modifiers held BEFORE this press" for the match).
+                let prior_mods = mods_for_cb.snapshot();
+                mods_for_cb.apply(&event.event_type);
+
+                // Helper: does this event press the chord's main key with
+                // EXACTLY the right modifiers held?
+                let matches_chord = |chord: &Chord, k: Key| -> bool {
+                    k == chord.key && prior_mods == chord.modifiers
+                };
+
                 let (msg, suppress) = match event.event_type {
-                    EventType::KeyPress(k) if k == cfg.dictation => {
-                        (Some(HotkeyEvent::DictationDown), true)
+                    EventType::KeyPress(k) => {
+                        if matches_chord(&cfg.dictation, k) {
+                            (Some(HotkeyEvent::DictationDown), true)
+                        } else if cfg
+                            .repeat
+                            .as_ref()
+                            .map(|c| matches_chord(c, k))
+                            .unwrap_or(false)
+                        {
+                            (Some(HotkeyEvent::RepeatLast), true)
+                        } else if matches_chord(&cfg.cancel, k) {
+                            (Some(HotkeyEvent::EscDown), true)
+                        } else {
+                            (None, false)
+                        }
                     }
-                    EventType::KeyRelease(k) if k == cfg.dictation => {
-                        // Suppress the release too so e.g. a held `~`
-                        // doesn't end with the OS thinking it should
-                        // commit the character.
-                        (Some(HotkeyEvent::DictationUp), true)
-                    }
-                    EventType::KeyPress(k) if Some(k) == cfg.repeat => {
-                        (Some(HotkeyEvent::RepeatLast), true)
-                    }
-                    EventType::KeyRelease(k) if Some(k) == cfg.repeat => {
-                        // Suppress the release for symmetry.
-                        (None, true)
-                    }
-                    EventType::KeyPress(k) if k == cfg.cancel => {
-                        (Some(HotkeyEvent::EscDown), true)
-                    }
-                    EventType::KeyRelease(k) if k == cfg.cancel => {
-                        (None, true)
+                    EventType::KeyRelease(k) => {
+                        // Mirror the press-side suppression for the
+                        // dictation key release (so push-to-talk's release
+                        // closes the recording cleanly), and suppress the
+                        // release of any other matched-on-press key for
+                        // symmetry with the press.
+                        if k == cfg.dictation.key {
+                            (Some(HotkeyEvent::DictationUp), true)
+                        } else if cfg.repeat.as_ref().map(|c| k == c.key).unwrap_or(false)
+                            || k == cfg.cancel.key
+                        {
+                            (None, true)
+                        } else {
+                            (None, false)
+                        }
                     }
                     _ => (None, false),
                 };
@@ -257,11 +376,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                 if let Some(ev) = msg {
                     let _ = tx.send(ev);
                 }
-                if suppress {
-                    None
-                } else {
-                    Some(event)
-                }
+                if suppress { None } else { Some(event) }
             });
             if let Err(e) = result {
                 eprintln!("[hotkey] rdev grab error: {e:?}");

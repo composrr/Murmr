@@ -1,0 +1,284 @@
+name: Release (cross-platform)
+
+# Triggered when you push a version tag like `v0.2.0`. Builds Windows + macOS
+# in parallel, then a third job stitches their .sig files into a single
+# `latest.json` and attaches the lot to a GitHub Release. Installed Murmr
+# clients poll
+#   https://github.com/composrr/Murmr/releases/latest/download/latest.json
+# so once this workflow finishes, every user on every platform sees the
+# update on their next "Check now".
+#
+# Manual trigger also supported via workflow_dispatch (creates a release tagged
+# with the input version) — useful for re-running a botched release without
+# making a new git tag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0). Will create tag v<version>.'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build platform binaries in parallel.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.os-label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            os-label: Windows x64
+            target: x86_64-pc-windows-msvc
+            platform-key: windows-x86_64
+            installer-glob: 'src-tauri/target/release/bundle/nsis/*.exe'
+            sig-glob:       'src-tauri/target/release/bundle/nsis/*.exe.sig'
+          - os: macos-latest
+            os-label: macOS Apple Silicon
+            target: aarch64-apple-darwin
+            platform-key: darwin-aarch64
+            installer-glob: 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz'
+            sig-glob:       'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig'
+            extra-installer-glob: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg'
+          - os: macos-latest
+            os-label: macOS Intel
+            target: x86_64-apple-darwin
+            platform-key: darwin-x86_64
+            installer-glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz'
+            sig-glob:       'src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig'
+            extra-installer-glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          # Cache key includes deployment target so changing it busts the
+          # cached whisper-rs-sys build (which embeds the deployment target
+          # into the linked Metal symbols). Bumped to v2 after we hit the
+          # __isPlatformVersionAtLeast linker error from a stale cache.
+          key: ${{ matrix.target }}-v2-macos13
+
+      # Windows-only LLVM (bindgen needs libclang). macOS gets it from Xcode.
+      - name: Install LLVM (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install -y llvm
+        shell: pwsh
+      - name: Set LIBCLANG_PATH (Windows)
+        if: matrix.os == 'windows-latest'
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      # macOS: install libomp regardless of whether the openmp feature is on.
+      # rust-cache can restore a stale whisper-rs-sys build with `-lomp` in
+      # its link line; without libomp present, the linker errors out. Cheap
+      # to install (~2s, prebuilt bottle) and makes the build robust against
+      # cache state.
+      - name: Install libomp (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libomp
+        shell: bash
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # The Whisper model is gitignored (~150 MB). Download fresh per build
+      # so the bundler picks it up.
+      - name: Download Whisper model
+        run: |
+          mkdir -p src-tauri/models
+          curl -L -o src-tauri/models/ggml-base.en.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+        shell: bash
+
+      - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Match tauri.conf.json's macOS minimumSystemVersion. Ggml-metal
+          # uses `@available(macOS 13, *)` checks; if the deployment target
+          # is older, clang emits __isPlatformVersionAtLeast runtime calls
+          # the linker can't resolve without -lclang_rt.osx.
+          #
+          # We set BOTH env vars because they reach different toolchains:
+          #   - MACOSX_DEPLOYMENT_TARGET is read by cc-rs (Rust C-FFI builds)
+          #   - CMAKE_OSX_DEPLOYMENT_TARGET is read by CMake (whisper.cpp's
+          #     ggml-metal Objective-C compile uses CMake, not cc-rs).
+          # Setting only the first is what failed v0.1.11 twice.
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            npm run tauri build -- --target ${{ matrix.target }}
+          else
+            npm run tauri build
+          fi
+        shell: bash
+
+      # The combiner job needs the .sig contents to build latest.json.
+      # Upload as a small artifact alongside the installer.
+      - name: Upload installer + sig artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform-key }}
+          path: |
+            ${{ matrix.installer-glob }}
+            ${{ matrix.sig-glob }}
+            ${{ matrix.extra-installer-glob }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Stitch latest.json + publish the GitHub Release.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create releases + upload assets
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version + tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ inputs.version }}"
+            TAG="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG} (version ${VERSION})"
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded files
+        run: find artifacts -type f | sort
+
+      # Build latest.json by reading each platform's .sig content. Each .sig
+      # file is a small text blob — Tauri's updater plugin verifies it
+      # against the public key baked into the installed binary, so we can't
+      # ship a release without these.
+      - name: Generate latest.json
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          NOTES="$(git log -1 --pretty=%B || echo 'Release v'"$VERSION")"
+
+          read_sig() {
+            local f="$1"
+            if [ -f "$f" ]; then
+              cat "$f"
+            else
+              echo ""
+            fi
+          }
+
+          # Find each platform's installer + sig.
+          WIN_EXE="$(find artifacts/windows-x86_64 -name '*-setup.exe' | head -1)"
+          WIN_SIG="$(find artifacts/windows-x86_64 -name '*-setup.exe.sig' | head -1)"
+
+          MAC_ARM_SIG="$(find artifacts/darwin-aarch64 -name '*.app.tar.gz.sig' | head -1)"
+          MAC_X64_SIG="$(find artifacts/darwin-x86_64 -name '*.app.tar.gz.sig' | head -1)"
+
+          BASE="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}"
+
+          # Build JSON with jq so quoting is safe. URLs use the renamed
+          # arch-suffixed filenames we'll produce in the next step (the raw
+          # .app.tar.gz files from Tauri don't include arch in the name and
+          # would collide if uploaded as-is).
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$NOTES" \
+            --arg pubdate "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg win_url "$BASE/$(basename "$WIN_EXE")" \
+            --arg win_sig "$(read_sig "$WIN_SIG")" \
+            --arg mac_arm_url "$BASE/Murmr_${VERSION}_aarch64.app.tar.gz" \
+            --arg mac_arm_sig "$(read_sig "$MAC_ARM_SIG")" \
+            --arg mac_x64_url "$BASE/Murmr_${VERSION}_x86_64.app.tar.gz" \
+            --arg mac_x64_sig "$(read_sig "$MAC_X64_SIG")" \
+            '{
+               version: $version,
+               notes: $notes,
+               pub_date: $pubdate,
+               platforms: ({} +
+                 (if $win_sig != "" then { "windows-x86_64": { signature: $win_sig, url: $win_url } } else {} end) +
+                 (if $mac_arm_sig != "" then { "darwin-aarch64": { signature: $mac_arm_sig, url: $mac_arm_url } } else {} end) +
+                 (if $mac_x64_sig != "" then { "darwin-x86_64": { signature: $mac_x64_sig, url: $mac_x64_url } } else {} end)
+               )
+             }' > latest.json
+
+          echo "--- latest.json ---"
+          cat latest.json
+
+      - name: Collect installers for the release
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          VERSION="${{ steps.ver.outputs.version }}"
+
+          # Windows + DMG files already have unique names (architecture is
+          # in the filename via Tauri's bundler). Just flat-copy.
+          find artifacts -type f \( -name '*.exe' -o -name '*.exe.sig' \
+                                  -o -name '*.msi' -o -name '*.msi.sig' \
+                                  -o -name '*.dmg' \) \
+            -exec cp {} dist/ \;
+
+          # Mac .app.tar.gz files DON'T include the architecture in their
+          # name — both arches produce a file literally called
+          # "Murmr.app.tar.gz". Flat-copying both clobbers one. Rename per
+          # artifact-source folder so each arch keeps its own signature.
+          for arch_dir in artifacts/darwin-aarch64 artifacts/darwin-x86_64; do
+            [ -d "$arch_dir" ] || continue
+            arch="${arch_dir##*/darwin-}"  # "aarch64" or "x86_64"
+            tarball="$(find "$arch_dir" -name '*.app.tar.gz' | head -1 || true)"
+            sig="$(find "$arch_dir" -name '*.app.tar.gz.sig' | head -1 || true)"
+            if [ -n "$tarball" ]; then
+              cp "$tarball" "dist/Murmr_${VERSION}_${arch}.app.tar.gz"
+            fi
+            if [ -n "$sig" ]; then
+              cp "$sig" "dist/Murmr_${VERSION}_${arch}.app.tar.gz.sig"
+            fi
+          done
+
+          cp latest.json dist/
+          ls -la dist/
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Murmr ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

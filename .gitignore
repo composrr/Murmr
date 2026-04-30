@@ -14,6 +14,8 @@ dist-ssr
 
 # Rust + Tauri build artifacts. Multi-GB after a few release builds.
 src-tauri/target/
+src-tauri/target-fresh/
+src-tauri/target-*/
 target/
 
 # Whisper model — 142 MB, downloaded fresh in CI per build (see
@@ -36,6 +38,10 @@ Thumbs.db
 # secret named MURMR_LICENSE_PUBKEY.
 .keys/license-priv.key
 .keys/*.priv.key
+
+# Personal key generator with the private key embedded inline. Lives next
+# to the safe-to-share key-generator.html. Never commit this one.
+tools/key-generator-personal.html
 
 # Local beta-updater staging directory — populated by `npm run release:beta`
 # and served by `npm run serve:updater`. Contains the latest installer +

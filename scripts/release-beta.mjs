@@ -83,6 +83,39 @@ if (newVersion !== oldVersion) {
   const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
   pkg.version = newVersion;
   writeFileSync(packageJsonPath, JSON.stringify(pkg, null, 2) + '\n');
+
+  // Auto-commit + push the version bump. Critical: without this, a later
+  // `git tag vX.Y.Z` lands on a commit where source still says the OLD
+  // version → CI builds installers named with the old version → OTA
+  // delivers a binary that immediately re-detects an update → infinite
+  // loop. Lesson learned the hard way at v0.1.20.
+  try {
+    execSync(
+      `git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock package.json`,
+      { cwd: ROOT, stdio: 'pipe' },
+    );
+    // Empty diff (e.g. user already committed) → nothing to commit, skip.
+    const status = execSync('git diff --cached --name-only', {
+      cwd: ROOT,
+    }).toString().trim();
+    if (status) {
+      execSync(`git commit -m "Bump version to ${newVersion}"`, {
+        cwd: ROOT,
+        stdio: 'pipe',
+      });
+      // Don't auto-push — let the user push when they're ready (avoids
+      // surprise commits on `main` mid-development). The commit IS made
+      // so a subsequent `git tag` lands on the right SHA.
+      console.log(
+        `[release-beta] committed version bump (NOT pushed — run \`git push\` before tagging)`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[release-beta] couldn't auto-commit version bump: ${e.message}\n` +
+        `[release-beta] make sure to commit ${newVersion} before tagging!`,
+    );
+  }
 }
 
 // --- Step 2: build ---------------------------------------------------------
@@ -99,7 +132,10 @@ if (!skipBuild) {
 
 // --- Step 3: locate artifacts + read .sig ---------------------------------
 
-const targetDir = join(ROOT, 'src-tauri', 'target', 'release', 'bundle');
+// Respect CARGO_TARGET_DIR — useful when Defender locks the normal target
+// dir and we need to build to a sibling location instead.
+const cargoTargetDir = process.env.CARGO_TARGET_DIR || join(ROOT, 'src-tauri', 'target');
+const targetDir = join(cargoTargetDir, 'release', 'bundle');
 
 // Tauri's NSIS bundler emits the installer + a separate signature file. We
 // upload the installer as-is and fold the .sig contents into latest.json.

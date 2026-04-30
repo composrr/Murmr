@@ -21,6 +21,8 @@
 //!   the second call is a no-op so we don't accidentally save the
 //!   already-ducked volume as the "prior" value.
 
+use crate::perf_log;
+
 #[cfg(target_os = "windows")]
 mod windows_impl;
 
@@ -29,18 +31,24 @@ mod windows_impl;
 ///
 /// Idempotent: calling `duck` while already ducked has no effect.
 pub fn duck(amount: f32) {
+    perf_log::append(&format!("[duck] requested amount={amount:.2}"));
     if amount <= 0.0 || amount > 1.0 {
+        perf_log::append("[duck] skipping (amount out of range or zero)");
         return;
     }
     #[cfg(target_os = "windows")]
     windows_impl::duck(amount);
     #[cfg(not(target_os = "windows"))]
-    let _ = amount;
+    {
+        perf_log::append("[duck] no-op on this platform");
+        let _ = amount;
+    }
 }
 
 /// Restore the volume captured by the most recent `duck` call. No-op if
 /// `duck` was never called or if we've already unducked.
 pub fn unduck() {
+    perf_log::append("[duck] unduck requested");
     #[cfg(target_os = "windows")]
     windows_impl::unduck();
 }

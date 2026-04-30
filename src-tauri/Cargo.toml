@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.9"
+version = "0.1.21"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"
@@ -31,6 +31,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -91,7 +92,11 @@ windows-sys = { version = "0.59", features = [
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_UI_Accessibility",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
 ] }
 
 # macOS: enable Metal acceleration for Whisper. On Apple Silicon this offloads
@@ -100,7 +105,16 @@ windows = { version = "0.62", features = [
 # automatically — works on Intel Macs too (with a smaller speedup) since
 # every Mac since 2012 has Metal.
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.16", default-features = false, features = ["raw-api", "openmp", "metal"] }
+# Mac CPU build for now. We HAD `metal` enabled here, but ggml-metal pulls
+# in `@available(macOS 13, *)` Objective-C runtime checks that emit
+# `__isPlatformVersionAtLeast`, a clang_rt symbol that doesn't link cleanly
+# against rust-built binaries on the GitHub macos-latest runner — we tried
+# bumping deployment target via MACOSX_* and CMAKE_OSX_* and neither
+# silenced the symbol. Shipping CPU-only Mac unblocks the team-distribution
+# goal; M-series CPU + NEON is still fast enough for usable dictation.
+# TODO: revisit Metal — likely needs explicit `-lclang_rt.osx` in RUSTFLAGS
+# (see local-build workaround in scripts/run-tauri.mjs on macOS 26+).
+whisper-rs = { version = "0.16", default-features = false, features = ["raw-api"] }
 # Used by focus/macos.rs to query the AXUIElement of the focused text field
 # and the main NSScreen's backingScaleFactor for points→pixels conversion.
 core-foundation = "0.10"
