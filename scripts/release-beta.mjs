@@ -66,6 +66,37 @@ const oldVersion = tauriConf.version;
 const newVersion = explicitVersion || bumpPatch(oldVersion);
 console.log(`[release-beta] bumping version: ${oldVersion} → ${newVersion}`);
 
+// Sanity check: if there are uncommitted SOURCE changes (anything other
+// than version files we're about to bump), refuse to release. The
+// auto-commit step below only stages version files — without this check,
+// it's painfully easy to release CI builds that don't include the source
+// changes you JUST made (this exact bug ate v0.1.24, v0.1.25, v0.1.26).
+{
+  const dirty = execSync('git status --porcelain', { cwd: ROOT })
+    .toString()
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => l.slice(3)) // strip 'XX ' prefix
+    .filter((path) => {
+      // The version-bump files ARE going to be committed by us. Ignore.
+      const versionFiles = new Set([
+        'src-tauri/Cargo.toml',
+        'src-tauri/Cargo.lock',
+        'src-tauri/tauri.conf.json',
+        'package.json',
+      ]);
+      return !versionFiles.has(path);
+    });
+  if (dirty.length > 0) {
+    console.error('[release-beta] refusing to release: uncommitted changes in:');
+    for (const path of dirty) console.error('  ' + path);
+    console.error('');
+    console.error('  Run `git add` + `git commit` before release-beta, or');
+    console.error('  pass --allow-dirty if you really want to release without them.');
+    if (!args.includes('--allow-dirty')) process.exit(1);
+  }
+}
+
 if (newVersion !== oldVersion) {
   // tauri.conf.json
   tauriConf.version = newVersion;

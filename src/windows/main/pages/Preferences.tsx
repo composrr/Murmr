@@ -84,10 +84,10 @@ export default function Preferences() {
       </Row>
 
       <SectionHeader>Sounds</SectionHeader>
-      <Row name="Start click" hint="Plays when recording begins">
+      <Row name="Start sound" hint="Plays the moment you press the dictation key">
         <Toggle on={settings.sound_start_click} onChange={(v) => update({ sound_start_click: v })} />
       </Row>
-      <Row name="Completion chime" hint="Plays when text is inserted">
+      <Row name="Stop sound" hint="Plays the moment you release / toggle off">
         <Toggle
           on={settings.sound_complete_chime}
           onChange={(v) => update({ sound_complete_chime: v })}
@@ -95,6 +95,29 @@ export default function Preferences() {
       </Row>
       <Row name="Error beep" hint="Plays on transcription failure">
         <Toggle on={settings.sound_error_beep} onChange={(v) => update({ sound_error_beep: v })} />
+      </Row>
+      <Row
+        name="Sound volume"
+        hint={
+          settings.sound_volume === 0
+            ? 'Muted — sounds are disabled regardless of the toggles above.'
+            : `${Math.round(settings.sound_volume * 100)}% of the file's native level (above 100% boosts).`
+        }
+      >
+        <div className="flex items-center gap-3 w-[260px]">
+          <input
+            type="range"
+            min={0}
+            max={1.5}
+            step={0.05}
+            value={settings.sound_volume ?? 0.7}
+            onChange={(e) => update({ sound_volume: parseFloat(e.target.value) })}
+            className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
+          />
+          <span className="text-[12px] text-text-tertiary tabular-nums w-[44px] text-right">
+            {Math.round((settings.sound_volume ?? 0.7) * 100)}%
+          </span>
+        </div>
       </Row>
       <Row
         name="Custom sound files"

@@ -182,6 +182,8 @@ export interface Settings {
   sound_start_click: boolean;
   sound_complete_chime: boolean;
   sound_error_beep: boolean;
+  /** 0.0 = silent, 1.0 = native, >1.0 boosts. Default 0.7. */
+  sound_volume: number;
   auto_capitalize: boolean;
   auto_period: boolean;
   strip_fillers: boolean;

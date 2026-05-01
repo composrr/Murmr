@@ -50,6 +50,10 @@ pub struct Settings {
     pub sound_start_click: bool,
     pub sound_complete_chime: bool,
     pub sound_error_beep: bool,
+    /// Master volume scalar applied to ALL Murmr UI sounds (start, stop,
+    /// error). 0.0 = silent, 1.0 = file's native level. Default 0.7 so the
+    /// embedded WAVs don't blast at full level on first launch.
+    pub sound_volume: f32,
 
     pub auto_capitalize: bool,
     pub auto_period: bool,
@@ -104,6 +108,7 @@ impl Default for Settings {
             sound_start_click: true,
             sound_complete_chime: true,
             sound_error_beep: true,
+            sound_volume: 0.7,
 
             auto_capitalize: true,
             auto_period: true,

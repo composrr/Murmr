@@ -152,6 +152,10 @@ impl Controller {
                 (HotkeyEvent::DictationDown, RecState::Toggled) => {
                     state = RecState::Idle;
                     press_at = None;
+                    // Stop sound fires on the user's action (the second tap),
+                    // BEFORE transcription runs — keeps the audio feedback
+                    // tied to the keypress, not delayed by Whisper.
+                    self.sounds.play_complete_chime();
                     self.complete_recording();
                 }
 
@@ -163,6 +167,8 @@ impl Controller {
                     if elapsed >= tap_threshold {
                         state = RecState::Idle;
                         press_at = None;
+                        // Push-to-talk release — fire stop sound immediately.
+                        self.sounds.play_complete_chime();
                         self.complete_recording();
                     } else {
                         state = RecState::Toggled;
@@ -363,8 +369,9 @@ impl Controller {
                         // Practice mode (onboarding wizard): emit the result
                         // for the UI to show, but don't paste anywhere and
                         // don't save to history.
+                        // (No play_complete_chime here — fires on release in
+                        // run() now, not after transcription.)
                         if practice_mode.load(Ordering::Relaxed) {
-                            sounds.play_complete_chime();
                             let _ = app.emit(
                                 "murmr:status",
                                 &Status::Injected {
@@ -412,7 +419,8 @@ impl Controller {
 
                         *last_injected.lock() = Some(text.clone());
 
-                        sounds.play_complete_chime();
+                        // Stop chime already fired on release in run() —
+                        // don't double-play here.
                         let _ = app.emit(
                             "murmr:status",
                             &Status::Injected {
