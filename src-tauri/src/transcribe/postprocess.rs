@@ -337,25 +337,39 @@ fn marker_value(tok: &str) -> Option<u32> {
 }
 
 fn apply_numbered_lists(text: &str) -> String {
-    // Pattern: at sentence-start (`^` or right after `.!?` + whitespace),
-    // capture a marker word/digit followed by a period AND optional space.
-    // Group 1 = the marker token.
+    // Rust's `regex` crate doesn't support lookbehind, so we capture the
+    // sentence-end character (or empty for start-of-text) explicitly in
+    // group 1, and the marker token in group 2.
+    //
+    //   group 1 = leading `.!?` or empty (start-of-text case)
+    //   group 2 = marker word / digit
+    //   match   = "<g1>\s+<g2>\."
+    //
+    // We rewrite the marker portion only, leaving group 1 in place.
     let re = match Regex::new(
-        r"(?i)(?:^|(?<=[.!?])\s+)(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)\.\s*",
+        r"(?i)(^|[.!?])\s+(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)\.\s*",
     ) {
         Ok(r) => r,
-        Err(_) => return text.to_string(),
+        Err(e) => {
+            crate::perf_log::append(&format!("[lists] regex compile failed: {e}"));
+            return text.to_string();
+        }
     };
 
     // First pass: collect all match positions + their numeric values.
-    let mut hits: Vec<(usize, usize, u32)> = Vec::new(); // (start, end, value)
+    // `start` is the position of the marker token (after the leading
+    // punctuation + whitespace), so the rewrite preserves the period of
+    // the previous sentence.
+    let mut hits: Vec<(usize, usize, u32)> = Vec::new(); // (marker_start, end, value)
     for m in re.captures_iter(text) {
-        let whole = m.get(0).unwrap();
-        let token = m.get(1).unwrap().as_str();
+        let token_match = m.get(2).unwrap();
+        let token = token_match.as_str();
         if let Some(value) = marker_value(token) {
-            hits.push((whole.start(), whole.end(), value));
+            let whole_end = m.get(0).unwrap().end();
+            hits.push((token_match.start(), whole_end, value));
         }
     }
+    crate::perf_log::append(&format!("[lists] found {} marker(s) in text", hits.len()));
 
     if hits.len() < 2 {
         return text.to_string();
@@ -377,8 +391,13 @@ fn apply_numbered_lists(text: &str) -> String {
     }
 
     if accepted.len() < 2 {
+        crate::perf_log::append(&format!(
+            "[lists] only {} marker(s) form a valid 1,2,3 sequence — leaving text alone",
+            accepted.len()
+        ));
         return text.to_string();
     }
+    crate::perf_log::append(&format!("[lists] reformatting {} items as numbered list", accepted.len()));
 
     // Rebuild the string, replacing each accepted marker with its
     // canonical form and prepending a newline (if not already at start).

@@ -28,6 +28,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -246,6 +247,18 @@ if (Object.keys(platforms).length === 0) {
 // --- Step 4: write manifest + copy artifacts ------------------------------
 
 mkdirSync(STAGING, { recursive: true });
+
+// Wipe stale installers from previous builds. Without this, --skip-build
+// runs (or any build that produces a different version) end up with a
+// manifest URL pointing at whichever Murmr_*.exe sorts first / was found
+// first by the artifact resolver. That's how 0.1.27's manifest ended up
+// pointing at the 0.1.14 binary and made every OTA install loop forever.
+for (const file of readdirSync(STAGING)) {
+  if (file === 'latest.json') continue; // overwritten below
+  try {
+    rmSync(join(STAGING, file), { force: true });
+  } catch {}
+}
 
 const manifest = {
   version: newVersion,
