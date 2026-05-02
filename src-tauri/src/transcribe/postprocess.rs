@@ -337,17 +337,22 @@ fn marker_value(tok: &str) -> Option<u32> {
 }
 
 fn apply_numbered_lists(text: &str) -> String {
+    // Log a truncated preview so we can see what Whisper actually produced
+    // (commas vs periods, digits vs words, etc.) when debugging "no markers
+    // found" reports.
+    let preview = if text.len() > 240 { format!("{}…", &text[..240]) } else { text.to_string() };
+    crate::perf_log::append(&format!("[lists] input: {preview:?}"));
+
     // Rust's `regex` crate doesn't support lookbehind, so we capture the
     // sentence-end character (or empty for start-of-text) explicitly in
-    // group 1, and the marker token in group 2.
+    // group 1. Markers may be followed by period, comma, OR colon — Whisper
+    // frequently inserts commas between "One" and the rest of an utterance.
     //
-    //   group 1 = leading `.!?` or empty (start-of-text case)
+    //   group 1 = leading `.!?,` or empty (start-of-text case)
     //   group 2 = marker word / digit
-    //   match   = "<g1>\s+<g2>\."
-    //
-    // We rewrite the marker portion only, leaving group 1 in place.
+    //   match   = "<g1>\s+<g2>[.,:]\s*"
     let re = match Regex::new(
-        r"(?i)(^|[.!?])\s+(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)\.\s*",
+        r"(?i)(^|[.!?,])\s+(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)[.,:]\s*",
     ) {
         Ok(r) => r,
         Err(e) => {
