@@ -58,6 +58,11 @@ pub struct Settings {
     pub auto_capitalize: bool,
     pub auto_period: bool,
     pub strip_fillers: bool,
+    /// When you say "One. Item one. Two. Item two. Three. Item three." in
+    /// a single dictation, automatically reformat it as a numbered list.
+    /// Markers must be in strict order starting from 1; sequences that
+    /// break (e.g. mid-prose mentions of numbers) are left alone.
+    pub auto_numbered_lists: bool,
     pub voice_command_period: bool,
     pub voice_command_comma: bool,
     pub voice_command_question: bool,
@@ -113,6 +118,7 @@ impl Default for Settings {
             auto_capitalize: true,
             auto_period: true,
             strip_fillers: true,
+            auto_numbered_lists: true,
             voice_command_period: true,
             voice_command_comma: true,
             voice_command_question: true,

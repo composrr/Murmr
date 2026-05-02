@@ -187,6 +187,8 @@ export interface Settings {
   auto_capitalize: boolean;
   auto_period: boolean;
   strip_fillers: boolean;
+  /** "One. Item. Two. Item." → numbered list. */
+  auto_numbered_lists: boolean;
   voice_command_period: boolean;
   voice_command_comma: boolean;
   voice_command_question: boolean;

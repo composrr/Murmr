@@ -51,6 +51,13 @@ pub fn process(
     if settings.auto_period {
         out = auto_period(&out);
     }
+    // Numbered-list detection runs AFTER capitalization + period so it
+    // sees the sentence-segmented form Whisper produced. Turning the
+    // markers into actual `1.` `2.` form adds newlines that auto_period
+    // would otherwise wreck.
+    if settings.auto_numbered_lists {
+        out = apply_numbered_lists(&out);
+    }
     out = apply_dictionary(&out, dictionary);
 
     ProcessOutcome {
@@ -290,6 +297,106 @@ fn auto_period(text: &str) -> String {
         return text.to_string();
     }
     format!("{}.", trimmed)
+}
+
+// ---------------------------------------------------------------------------
+// 4b. Numbered lists
+// ---------------------------------------------------------------------------
+//
+// Detects sequences like "One. ... Two. ... Three. ..." and reformats them
+// into a real numbered list:
+//
+//   "Here are the colors. One. Blue. Two. Green. Three. Red."
+//      ↓
+//   "Here are the colors.\n1. Blue.\n2. Green.\n3. Red."
+//
+// Detection rules:
+//   - Markers must be at sentence-start (start of text OR after `.!?`).
+//   - Markers must form a strictly-increasing sequence starting from 1
+//     (so an isolated "One" mid-sentence doesn't get corrupted).
+//   - At least 2 markers needed — single "One." stays prose.
+//
+// Recognized marker words: one through twenty (case-insensitive) AND digits
+// 1–20. Whisper sometimes hears "1" as the digit, sometimes spells it out.
+
+const MARKER_WORDS: &[&str] = &[
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+    "eighteen", "nineteen", "twenty",
+];
+
+/// Map a marker token (lowercased, no period) to its numeric value, or None
+/// if it isn't a recognized marker.
+fn marker_value(tok: &str) -> Option<u32> {
+    if let Ok(n) = tok.parse::<u32>() {
+        if (1..=20).contains(&n) {
+            return Some(n);
+        }
+    }
+    MARKER_WORDS.iter().position(|w| *w == tok.to_lowercase()).map(|i| (i + 1) as u32)
+}
+
+fn apply_numbered_lists(text: &str) -> String {
+    // Pattern: at sentence-start (`^` or right after `.!?` + whitespace),
+    // capture a marker word/digit followed by a period AND optional space.
+    // Group 1 = the marker token.
+    let re = match Regex::new(
+        r"(?i)(?:^|(?<=[.!?])\s+)(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)\.\s*",
+    ) {
+        Ok(r) => r,
+        Err(_) => return text.to_string(),
+    };
+
+    // First pass: collect all match positions + their numeric values.
+    let mut hits: Vec<(usize, usize, u32)> = Vec::new(); // (start, end, value)
+    for m in re.captures_iter(text) {
+        let whole = m.get(0).unwrap();
+        let token = m.get(1).unwrap().as_str();
+        if let Some(value) = marker_value(token) {
+            hits.push((whole.start(), whole.end(), value));
+        }
+    }
+
+    if hits.len() < 2 {
+        return text.to_string();
+    }
+
+    // Filter to a strictly-increasing-from-1 prefix. e.g. if hits are
+    // [1, 2, 5, 3], we accept only [1, 2] and stop. Prevents accidental
+    // pickup of mid-prose mentions like "...by one. Yes by two ways. The
+    // five steps were..." — the 5 breaks the 1,2,3 sequence.
+    let mut accepted: Vec<(usize, usize, u32)> = Vec::new();
+    let mut expected = 1u32;
+    for hit in &hits {
+        if hit.2 == expected {
+            accepted.push(*hit);
+            expected += 1;
+        } else {
+            break;
+        }
+    }
+
+    if accepted.len() < 2 {
+        return text.to_string();
+    }
+
+    // Rebuild the string, replacing each accepted marker with its
+    // canonical form and prepending a newline (if not already at start).
+    let mut out = String::with_capacity(text.len() + accepted.len() * 2);
+    let mut cursor = 0;
+    for (start, end, value) in &accepted {
+        // Append text before this marker, trimming any trailing whitespace
+        // that would otherwise sit before our newline.
+        out.push_str(text[cursor..*start].trim_end());
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("{value}. "));
+        cursor = *end;
+    }
+    // Trailing text after the last marker.
+    out.push_str(&text[cursor..]);
+    out
 }
 
 // ---------------------------------------------------------------------------

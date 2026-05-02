@@ -138,6 +138,15 @@ export default function Preferences() {
       <Row name="Strip filler words" hint='Removes "um", "uh", "you know", etc.'>
         <Toggle on={settings.strip_fillers} onChange={(v) => update({ strip_fillers: v })} />
       </Row>
+      <Row
+        name="Auto numbered lists"
+        hint='Say "One. First item. Two. Second item." and Murmr formats it as a real numbered list.'
+      >
+        <Toggle
+          on={settings.auto_numbered_lists}
+          onChange={(v) => update({ auto_numbered_lists: v })}
+        />
+      </Row>
 
       <SectionHeader>Voice commands</SectionHeader>
       <Row name='"period" → .' hint="Spoken at end of utterance becomes punctuation">
