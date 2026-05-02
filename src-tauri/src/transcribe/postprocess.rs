@@ -310,14 +310,23 @@ fn auto_period(text: &str) -> String {
 //      ↓
 //   "Here are the colors.\n1. Blue.\n2. Green.\n3. Red."
 //
-// Detection rules:
-//   - Markers must be at sentence-start (start of text OR after `.!?`).
-//   - Markers must form a strictly-increasing sequence starting from 1
-//     (so an isolated "One" mid-sentence doesn't get corrupted).
-//   - At least 2 markers needed — single "One." stays prose.
+// Detection happens in two modes:
+//   1. STRICT (no list intent detected): markers must form a strictly-
+//      increasing 1,2,3,... sequence starting from 1, ≥2 items.
+//   2. LOOSE (list intent detected in the surrounding text): markers must
+//      form ANY monotonically-increasing sequence ≥2 items. Output is
+//      always renumbered cleanly from 1.
 //
-// Recognized marker words: one through twenty (case-insensitive) AND digits
-// 1–20. Whisper sometimes hears "1" as the digit, sometimes spells it out.
+// "Intent" = the user said something like "here are…", "the following…",
+// "let me list…", "two things…", "three reasons…", etc. earlier in the
+// transcript. When that's present we trust the speaker is actually
+// enumerating, so we tolerate sloppier markers ("first… third…" or
+// "two… three…").
+//
+// Recognized markers:
+//   - Cardinal words: one, two, ..., twenty
+//   - Ordinal words:  first, second, ..., twentieth
+//   - Digits:         1, 2, ..., 20  (with optional ordinal suffix: 1st, 2nd)
 
 const MARKER_WORDS: &[&str] = &[
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -325,15 +334,54 @@ const MARKER_WORDS: &[&str] = &[
     "eighteen", "nineteen", "twenty",
 ];
 
+const ORDINAL_WORDS: &[&str] = &[
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth",
+    "eighteenth", "nineteenth", "twentieth",
+];
+
 /// Map a marker token (lowercased, no period) to its numeric value, or None
-/// if it isn't a recognized marker.
+/// if it isn't a recognized marker. Accepts cardinal words, ordinal words,
+/// and digits with or without an ordinal suffix (1st / 2nd / 3rd / 4th).
 fn marker_value(tok: &str) -> Option<u32> {
-    if let Ok(n) = tok.parse::<u32>() {
+    let lower = tok.to_lowercase();
+
+    // Numeric, with optional ordinal suffix. Strip the suffix and parse.
+    let numeric_part = lower
+        .trim_end_matches("st")
+        .trim_end_matches("nd")
+        .trim_end_matches("rd")
+        .trim_end_matches("th");
+    if let Ok(n) = numeric_part.parse::<u32>() {
         if (1..=20).contains(&n) {
             return Some(n);
         }
     }
-    MARKER_WORDS.iter().position(|w| *w == tok.to_lowercase()).map(|i| (i + 1) as u32)
+
+    // Cardinal word.
+    if let Some(i) = MARKER_WORDS.iter().position(|w| *w == lower) {
+        return Some((i + 1) as u32);
+    }
+
+    // Ordinal word.
+    if let Some(i) = ORDINAL_WORDS.iter().position(|w| *w == lower) {
+        return Some((i + 1) as u32);
+    }
+
+    None
+}
+
+/// Heuristic: does the text contain phrases that signal the speaker is
+/// about to enumerate items? When this returns true, we trust enumeration
+/// intent enough to relax the marker-sequence rules (allow non-1 starts,
+/// allow skipped numbers).
+fn has_list_intent(text: &str) -> bool {
+    // Catches: "here are…", "here is/'s…", "the following…", "let me list…",
+    // "listing", "a few <thing>", "several <thing>", "couple of <thing>",
+    // "<number> things|items|points|reasons|steps|ways|tips|notes|options|
+    // choices|features|examples|categories|topics|questions|ideas".
+    let pat = r"(?i)\b(?:here(?:'s| (?:are|is))|the following|let me list|listing|a few \w+|several \w+|couple of \w+|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|2|3|4|5|6|7|8|9|10|11|12)\s+(?:things|items|points|reasons|steps|ways|tips|notes|options|choices|features|examples|categories|topics|questions|ideas))\b";
+    Regex::new(pat).map(|r| r.is_match(text)).unwrap_or(false)
 }
 
 fn apply_numbered_lists(text: &str) -> String {
@@ -343,21 +391,23 @@ fn apply_numbered_lists(text: &str) -> String {
     let preview = if text.len() > 240 { format!("{}…", &text[..240]) } else { text.to_string() };
     crate::perf_log::append(&format!("[lists] input: {preview:?}"));
 
+    let intent = has_list_intent(text);
+    crate::perf_log::append(&format!("[lists] list intent detected: {intent}"));
+
     // Rust's `regex` crate doesn't support lookbehind, so we capture the
     // sentence-end character (or empty for start-of-text) explicitly in
-    // group 1. Markers may be followed by period, comma, OR colon — Whisper
-    // frequently inserts commas between "One" and the rest of an utterance.
+    // group 1. Markers may be followed by period, comma, colon, `?`, or `!`.
     //
-    // The optional connector clause (`and`/`or`/etc.) handles the common
-    // pattern where the speaker joins items: "...item one, and two, item
-    // two." That second "two" needs to match even though it's separated
-    // from the previous comma by a connector word.
+    // The optional connector clause (`and`/`or`/`for`/etc.) handles the
+    // common pattern where the speaker joins items: "...item one, and two,
+    // item two." That second "two" needs to match even though it's
+    // separated from the previous comma by a connector word.
     //
     //   group 1 = leading `.!?,` or empty (start-of-text case)
-    //   group 2 = marker word / digit
-    //   match   = "<g1>\s+(?:connector\s+)?<g2>[.,:]\s*"
+    //   group 2 = marker token (cardinal / ordinal / digit)
+    //   match   = "<g1>\s+(?:connector\s+)?<g2>[.,:!?]\s*"
     let re = match Regex::new(
-        r"(?i)(^|[.!?,])\s+(?:(?:and|or|but|then|plus|next|finally|also|so|number)\s+)?(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)[.,:]\s*",
+        r"(?i)(^|[.!?,])\s+(?:(?:and|or|but|then|plus|next|finally|also|so|number|step|item|point|for|reason)\s+)?(\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2}(?:st|nd|rd|th)?)\b)[.,:!?]\s*",
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -387,42 +437,61 @@ fn apply_numbered_lists(text: &str) -> String {
         return text.to_string();
     }
 
-    // Filter to a strictly-increasing-from-1 prefix. e.g. if hits are
-    // [1, 2, 5, 3], we accept only [1, 2] and stop. Prevents accidental
-    // pickup of mid-prose mentions like "...by one. Yes by two ways. The
-    // five steps were..." — the 5 breaks the 1,2,3 sequence.
-    let mut accepted: Vec<(usize, usize, u32)> = Vec::new();
-    let mut expected = 1u32;
-    for hit in &hits {
-        if hit.2 == expected {
-            accepted.push(*hit);
-            expected += 1;
-        } else {
-            break;
+    // Threshold:
+    //   - With intent: any monotonically-increasing chain ≥2 markers.
+    //     "first… third…" or "two… three… five…" all count.
+    //   - Without intent: strict 1,2,3,... starting from 1, ≥2 markers.
+    //     Prevents corruption of prose like "...page one. Then on page
+    //     three..." where the speaker isn't actually listing.
+    let accepted: Vec<(usize, usize, u32)> = if intent {
+        let mut accepted = Vec::new();
+        let mut last_value = 0u32;
+        for hit in &hits {
+            if hit.2 > last_value {
+                accepted.push(*hit);
+                last_value = hit.2;
+            }
         }
-    }
+        accepted
+    } else {
+        let mut accepted = Vec::new();
+        let mut expected = 1u32;
+        for hit in &hits {
+            if hit.2 == expected {
+                accepted.push(*hit);
+                expected += 1;
+            } else {
+                break;
+            }
+        }
+        accepted
+    };
 
     if accepted.len() < 2 {
         crate::perf_log::append(&format!(
-            "[lists] only {} marker(s) form a valid 1,2,3 sequence — leaving text alone",
+            "[lists] only {} marker(s) form a valid sequence (intent={intent}) — leaving text alone",
             accepted.len()
         ));
         return text.to_string();
     }
-    crate::perf_log::append(&format!("[lists] reformatting {} items as numbered list", accepted.len()));
+    crate::perf_log::append(&format!(
+        "[lists] reformatting {} items as numbered list (intent={intent})",
+        accepted.len()
+    ));
 
-    // Rebuild the string, replacing each accepted marker with its
-    // canonical form and prepending a newline (if not already at start).
+    // Rebuild the string, replacing each accepted marker with its sequential
+    // canonical form (1, 2, 3, ...) and prepending a newline if not already
+    // at start. We renumber from 1 unconditionally so a "first… third…"
+    // pattern outputs "1. ... 2. ..." cleanly — the user wanted a list, the
+    // specific numbers they spoke were just enumeration cues.
     let mut out = String::with_capacity(text.len() + accepted.len() * 2);
     let mut cursor = 0;
-    for (start, end, value) in &accepted {
-        // Append text before this marker, trimming any trailing whitespace
-        // that would otherwise sit before our newline.
+    for (i, (start, end, _value)) in accepted.iter().enumerate() {
         out.push_str(text[cursor..*start].trim_end());
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(&format!("{value}. "));
+        out.push_str(&format!("{}. ", i + 1));
         cursor = *end;
     }
     // Trailing text after the last marker.
