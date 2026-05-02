@@ -348,11 +348,16 @@ fn apply_numbered_lists(text: &str) -> String {
     // group 1. Markers may be followed by period, comma, OR colon — Whisper
     // frequently inserts commas between "One" and the rest of an utterance.
     //
+    // The optional connector clause (`and`/`or`/etc.) handles the common
+    // pattern where the speaker joins items: "...item one, and two, item
+    // two." That second "two" needs to match even though it's separated
+    // from the previous comma by a connector word.
+    //
     //   group 1 = leading `.!?,` or empty (start-of-text case)
     //   group 2 = marker word / digit
-    //   match   = "<g1>\s+<g2>[.,:]\s*"
+    //   match   = "<g1>\s+(?:connector\s+)?<g2>[.,:]\s*"
     let re = match Regex::new(
-        r"(?i)(^|[.!?,])\s+(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)[.,:]\s*",
+        r"(?i)(^|[.!?,])\s+(?:(?:and|or|but|then|plus|next|finally|also|so|number)\s+)?(\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d{1,2})\b)[.,:]\s*",
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -361,17 +366,19 @@ fn apply_numbered_lists(text: &str) -> String {
         }
     };
 
-    // First pass: collect all match positions + their numeric values.
-    // `start` is the position of the marker token (after the leading
-    // punctuation + whitespace), so the rewrite preserves the period of
-    // the previous sentence.
-    let mut hits: Vec<(usize, usize, u32)> = Vec::new(); // (marker_start, end, value)
+    // First pass: collect cut points + their numeric values. We cut RIGHT
+    // AFTER the leading punctuation (group 1) so the previous sentence
+    // keeps its terminal `.`/`,` and the connector word (`and`, `or`, …)
+    // gets dropped along with the marker.
+    let mut hits: Vec<(usize, usize, u32)> = Vec::new(); // (cut_start, end, value)
     for m in re.captures_iter(text) {
-        let token_match = m.get(2).unwrap();
-        let token = token_match.as_str();
+        let leading = m.get(1).unwrap();
+        let token = m.get(2).unwrap().as_str();
         if let Some(value) = marker_value(token) {
             let whole_end = m.get(0).unwrap().end();
-            hits.push((token_match.start(), whole_end, value));
+            // leading.end() is 0 for start-of-text matches and `pos+1` for
+            // mid-text matches — exactly the cut point we want.
+            hits.push((leading.end(), whole_end, value));
         }
     }
     crate::perf_log::append(&format!("[lists] found {} marker(s) in text", hits.len()));
