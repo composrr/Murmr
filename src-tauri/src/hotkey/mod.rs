@@ -15,10 +15,18 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rdev::{grab, Event, EventType, Key};
+
+/// How long we wait after a bare-modifier dictation key press before
+/// committing to "this is a dictation hold" vs "this is a modifier in a
+/// combo like Ctrl+V". Anything shorter and we can't reliably catch the
+/// follow-up keystroke; anything longer and push-to-talk feels laggy at
+/// the start of the recording.
+const BARE_MODIFIER_COMMIT_DELAY: Duration = Duration::from_millis(80);
 
 // ---------------------------------------------------------------------------
 // Chord type — modifiers + main key
@@ -36,6 +44,31 @@ impl ModifierSet {
     fn empty(&self) -> bool {
         !(self.ctrl || self.shift || self.alt || self.meta)
     }
+}
+
+/// True when this key is a modifier-only physical key (any Ctrl/Shift/Alt/Meta).
+/// These keys never type a character on their own, so when bound as a bare
+/// dictation hotkey we can pass them through to the OS — apps need to see
+/// them so combos like Ctrl+V still work.
+fn is_modifier_key(k: Key) -> bool {
+    matches!(
+        k,
+        Key::ControlLeft
+            | Key::ControlRight
+            | Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::Alt
+            | Key::AltGr
+            | Key::MetaLeft
+            | Key::MetaRight
+    )
+}
+
+/// True when the chord is just a bare modifier (no chord modifiers required,
+/// main key is itself a modifier). These need the deferred-commit treatment
+/// so they don't break combo shortcuts in the focused app.
+fn chord_is_bare_modifier(chord: &Chord) -> bool {
+    chord.modifiers.empty() && is_modifier_key(chord.key)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -304,24 +337,49 @@ impl ModifierState {
     }
 }
 
+/// Pending state for a bare-modifier dictation press. We delay firing
+/// `DictationDown` until either:
+///   - The commit timer elapses with no other key pressed → real dictation.
+///   - Any other non-modifier key is pressed → it was a combo (Ctrl+V),
+///     drop the pending state and never fire.
+/// `pressed_at` doubles as a unique ID so a stale timer thread can detect
+/// "this press was cancelled / superseded" by checking the timestamp.
+#[derive(Default)]
+struct PendingPress {
+    pressed_at: Option<Instant>,
+    committed: bool,
+}
+
 /// Spawn the OS keyboard hook thread. Bindings come from `initial_config`
 /// and can be hot-swapped via `update_config(...)` without restarting.
 ///
 /// Suppression rule: only the *main key* of a matched chord is consumed.
 /// Modifiers always pass through normally — otherwise binding to
 /// `Ctrl+Shift+V` would break every app's normal Ctrl handling.
+///
+/// **Bare-modifier hotkeys (Ctrl/Shift/Alt/Meta) get special handling**: we
+/// don't suppress the press, AND we defer firing `DictationDown` by ~80ms
+/// so combos like Ctrl+V (where the user's holding our dictation modifier
+/// briefly as part of a shortcut) don't trigger an unwanted recording. Any
+/// non-modifier key pressed inside that 80ms window cancels the pending
+/// dictation. Push-to-talk loses 80ms at the start of the recording — a
+/// negligible cost for keeping system shortcuts working.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     *config_handle().write() = initial_config;
 
     let modifiers = ModifierState::default();
     let mods_for_cb = modifiers.clone();
     let cfg_for_cb = config_handle();
+    let pending = Arc::new(Mutex::new(PendingPress::default()));
+    let pending_for_cb = pending.clone();
+    let tx_for_cb = tx.clone();
 
     std::thread::Builder::new()
         .name("murmr-hotkey".into())
         .spawn(move || {
             let result = grab(move |event: Event| -> Option<Event> {
                 let cfg = *cfg_for_cb.read();
+                let dict_is_bare_mod = chord_is_bare_modifier(&cfg.dictation);
 
                 // Snapshot modifier state PRIOR to applying this event so
                 // chords with bare-modifier main keys (e.g. main = ControlRight,
@@ -339,8 +397,59 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
 
                 let (msg, suppress) = match event.event_type {
                     EventType::KeyPress(k) => {
+                        // If a bare-modifier dictation press is currently
+                        // pending (not yet committed) and this is some OTHER
+                        // non-modifier key, the user is doing a combo.
+                        // Cancel the pending press so DictationDown never
+                        // fires. (Modifier-on-modifier presses don't count
+                        // — pressing Shift while holding Ctrl is fine.)
+                        if dict_is_bare_mod
+                            && k != cfg.dictation.key
+                            && !is_modifier_key(k)
+                        {
+                            let mut pp = pending_for_cb.lock();
+                            if pp.pressed_at.is_some() && !pp.committed {
+                                pp.pressed_at = None;
+                            }
+                        }
+
                         if matches_chord(&cfg.dictation, k) {
-                            (Some(HotkeyEvent::DictationDown), true)
+                            if dict_is_bare_mod {
+                                // Defer the commit. Spawn a one-shot timer
+                                // that fires DictationDown after the delay
+                                // IF the press is still pending (i.e.
+                                // hasn't been cancelled by a combo or by
+                                // an early release). Pass the modifier
+                                // through so the focused app sees it.
+                                let press_at = Instant::now();
+                                {
+                                    let mut pp = pending_for_cb.lock();
+                                    pp.pressed_at = Some(press_at);
+                                    pp.committed = false;
+                                }
+                                let pp_for_thread = pending_for_cb.clone();
+                                let tx_for_thread = tx_for_cb.clone();
+                                let _ = std::thread::Builder::new()
+                                    .name("murmr-hotkey-defer".into())
+                                    .spawn(move || {
+                                        std::thread::sleep(BARE_MODIFIER_COMMIT_DELAY);
+                                        let mut pp = pp_for_thread.lock();
+                                        // `pressed_at` is our unique ID:
+                                        // if a newer press has overwritten
+                                        // it, OR the press got cancelled
+                                        // (cleared to None), or the main
+                                        // thread already committed, this
+                                        // timer is stale.
+                                        if pp.pressed_at == Some(press_at) && !pp.committed {
+                                            pp.committed = true;
+                                            drop(pp);
+                                            let _ = tx_for_thread.send(HotkeyEvent::DictationDown);
+                                        }
+                                    });
+                                (None, false)
+                            } else {
+                                (Some(HotkeyEvent::DictationDown), true)
+                            }
                         } else if cfg
                             .repeat
                             .as_ref()
@@ -355,13 +464,30 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         }
                     }
                     EventType::KeyRelease(k) => {
-                        // Mirror the press-side suppression for the
-                        // dictation key release (so push-to-talk's release
-                        // closes the recording cleanly), and suppress the
-                        // release of any other matched-on-press key for
-                        // symmetry with the press.
                         if k == cfg.dictation.key {
-                            (Some(HotkeyEvent::DictationUp), true)
+                            if dict_is_bare_mod {
+                                // Bare-modifier release. Only fire
+                                // DictationUp if the press actually
+                                // committed (passed the 80ms threshold
+                                // without a combo cancelling it).
+                                let was_committed = {
+                                    let mut pp = pending_for_cb.lock();
+                                    let c = pp.committed;
+                                    pp.pressed_at = None;
+                                    pp.committed = false;
+                                    c
+                                };
+                                if was_committed {
+                                    (Some(HotkeyEvent::DictationUp), false)
+                                } else {
+                                    (None, false)
+                                }
+                            } else {
+                                // Mirror the press-side suppression for the
+                                // dictation key release (so push-to-talk's
+                                // release closes the recording cleanly).
+                                (Some(HotkeyEvent::DictationUp), true)
+                            }
                         } else if cfg.repeat.as_ref().map(|c| k == c.key).unwrap_or(false)
                             || k == cfg.cancel.key
                         {
