@@ -16,6 +16,103 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.35 — Escape works again, word counter accuracy
+
+### Fixed
+
+- **Escape key passes through to the focused app when no recording is
+  active.** Previously the cancel hotkey was suppressed system-wide, so
+  Escape couldn't dismiss menus, dialogs, or modals in any other app
+  while Murmr was running. Now Murmr only steals Escape during an
+  actual recording (where it still cancels as before).
+- **Word counter no longer ticks during pauses.** The HUD's speech
+  threshold was below typical room noise on many setups (especially
+  through VoiceMeeter and similar virtual mixers), so the counter
+  climbed at a constant rate even when you weren't speaking. Threshold
+  now matches the transcription gate — counter only moves when audio
+  is loud enough to actually be transcribed.
+- **Tap-vs-hold timing**: a 250ms intentional hold ended up looking
+  like 170ms to the controller after the v0.1.33 deferred-commit
+  change, sometimes parking sessions in Toggled mode unexpectedly
+  (which can lead to "missing" transcriptions if you don't realize
+  the recording is still going). The controller now measures elapsed
+  time from the real key press, so configured tap thresholds behave
+  exactly as set.
+
+### Improved
+
+- **Per-recording diagnostics in `perf.log`** — every recording
+  writes a one-line summary (duration, sample count, peak RMS,
+  whether VAD accepted it) plus state transitions. Makes "sometimes
+  it doesn't post" reports diagnosable from a single log paste.
+
+---
+
+## v0.1.33 — Ctrl+V (and other modifier combos) work alongside dictation
+
+### Fixed
+
+- **Bare-modifier dictation hotkeys (default Right Ctrl) no longer
+  break combo shortcuts in other apps.** Pressing Ctrl+V to paste
+  used to come through as just `V` because Murmr was eating the
+  Ctrl press to fire dictation. Now when the dictation hotkey is a
+  bare modifier (Ctrl/Shift/Alt/Meta), the press passes through to
+  the focused app, and "start dictation" is held back for ~80ms — if
+  any non-modifier key arrives in that window, it was a combo and
+  no recording starts. If 80ms passes with no other key, recording
+  starts as normal. Push-to-talk loses 80ms at the very start, which
+  is imperceptible. Non-modifier hotkeys (F8, letters, symbols)
+  keep the original suppress-on-press behavior.
+
+---
+
+## v0.1.32 — Smarter numbered-list detection
+
+### New
+
+- **Ordinals work as list markers.** "First, ... second, ... third, ..."
+  formats as a numbered list, same as "one, two, three". Both word
+  forms (first–twentieth) and numeric forms (1st, 2nd, 3rd, 4th) are
+  recognized.
+- **List-intent detection.** When the surrounding text contains
+  setup phrases like "here are…", "the following…", "let me list…",
+  "two things…", "three reasons…", "a few options…", Murmr is more
+  willing to format an enumeration even if the markers don't start
+  at 1 ("two… three…") or skip a number ("first… third…"). Without
+  intent it stays strict to avoid corrupting prose like "page one…
+  page three".
+
+### Improved
+
+- Connector words (`and`, `or`, `for`, `step`, `item`, `point`,
+  `reason`, …) between punctuation and a marker no longer block the
+  match — "...do this. **And two**, do that." formats correctly.
+- Output always renumbers cleanly from 1, regardless of which
+  markers the speaker actually used.
+
+---
+
+## v0.1.27 — Custom start / stop sounds + volume control
+
+### New
+
+- **Bundled start and stop chimes** for the press / release of the
+  dictation hotkey. Distinct, short, and tuned to be audible
+  without dominating whatever you're listening to.
+- **Sound volume slider** in Settings → Audio. Defaults to 70%.
+  Set to 0 to mute Murmr's own sounds entirely.
+- Drop a custom `start.wav` or `stop.wav` into
+  `<app-data>/sounds/` to override the bundled chimes.
+
+### Improved
+
+- Mac sound playback fixed — was using a fixed-duration timer that
+  raced CoreAudio init on cold launch, so the first chime of a
+  session sometimes never reached the speakers. Now waits for the
+  audio sink to actually drain.
+
+---
+
 ## v0.1.23 — Murmr is free
 
 ### New
