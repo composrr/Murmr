@@ -25,7 +25,7 @@ use crate::audio::{self, Recorder};
 use crate::audio_duck;
 use crate::db::Db;
 use crate::focus;
-use crate::hotkey::HotkeyEvent;
+use crate::hotkey::{self, HotkeyEvent};
 use crate::injector;
 use crate::perf_log;
 use crate::settings::SettingsStore;
@@ -145,6 +145,7 @@ impl Controller {
                         continue;
                     }
                     state = RecState::HoldUncertain;
+                    hotkey::set_recording_active(true);
                     // Use the user-perceived press time, not Now. For bare-
                     // modifier dictation the hotkey thread defers the
                     // event by ~80ms; without this the tap-vs-hold logic
@@ -160,6 +161,7 @@ impl Controller {
                 (HotkeyEvent::DictationDown { .. }, RecState::Toggled) => {
                     perf_log::append("[ctrl] DictationDown in Toggled → stop + transcribe");
                     state = RecState::Idle;
+                    hotkey::set_recording_active(false);
                     press_at = None;
                     // Stop sound fires on the user's action (the second tap),
                     // BEFORE transcription runs — keeps the audio feedback
@@ -181,12 +183,14 @@ impl Controller {
                     ));
                     if elapsed >= tap_threshold {
                         state = RecState::Idle;
+                        hotkey::set_recording_active(false);
                         press_at = None;
                         // Push-to-talk release — fire stop sound immediately.
                         self.sounds.play_complete_chime();
                         self.complete_recording();
                     } else {
                         state = RecState::Toggled;
+                        // recording_active stays true — Toggled means recording continues
                     }
                 }
                 (HotkeyEvent::DictationUp, _) => {}
@@ -196,6 +200,7 @@ impl Controller {
                     let _ = self.recorder.cancel();
                     audio_duck::unduck();
                     state = RecState::Idle;
+                    hotkey::set_recording_active(false);
                     press_at = None;
                     self.emit(Status::Cancelled);
                     self.hide_hud();

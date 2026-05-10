@@ -304,6 +304,21 @@ pub fn update_config(new_config: HotkeyConfig) {
     *handle.write() = new_config;
 }
 
+/// Set by the controller while a recording is in flight (HoldUncertain or
+/// Toggled). The hotkey thread reads this to decide whether to suppress
+/// the cancel key. We only steal Escape from the focused app while there's
+/// actually something to cancel — otherwise Escape behaves normally
+/// (closes menus, dismisses dialogs, etc.).
+static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_recording_active(active: bool) {
+    RECORDING_ACTIVE.store(active, Ordering::Relaxed);
+}
+
+fn is_recording_active() -> bool {
+    RECORDING_ACTIVE.load(Ordering::Relaxed)
+}
+
 // ---------------------------------------------------------------------------
 // Listener
 // ---------------------------------------------------------------------------
@@ -479,7 +494,16 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         {
                             (Some(HotkeyEvent::RepeatLast), true)
                         } else if matches_chord(&cfg.cancel, k) {
-                            (Some(HotkeyEvent::EscDown), true)
+                            // Cancel key (default Escape) — only suppress
+                            // and fire EscDown when there's an actual
+                            // recording to cancel. Otherwise Escape just
+                            // passes through to the focused app so menus,
+                            // dialogs, and modals still dismiss normally.
+                            if is_recording_active() {
+                                (Some(HotkeyEvent::EscDown), true)
+                            } else {
+                                (None, false)
+                            }
                         } else {
                             (None, false)
                         }
@@ -509,10 +533,19 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                 // release closes the recording cleanly).
                                 (Some(HotkeyEvent::DictationUp), true)
                             }
-                        } else if cfg.repeat.as_ref().map(|c| k == c.key).unwrap_or(false)
-                            || k == cfg.cancel.key
-                        {
+                        } else if cfg.repeat.as_ref().map(|c| k == c.key).unwrap_or(false) {
+                            // Repeat-key release — suppress for symmetry
+                            // with the press side.
                             (None, true)
+                        } else if k == cfg.cancel.key {
+                            // Mirror the conditional press-side suppression
+                            // — only swallow the release if we swallowed
+                            // the press (i.e. a recording is active).
+                            if is_recording_active() {
+                                (None, true)
+                            } else {
+                                (None, false)
+                            }
                         } else {
                             (None, false)
                         }
