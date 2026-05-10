@@ -134,8 +134,10 @@ impl Controller {
         while let Ok(ev) = rx.recv() {
             // License gate removed in v0.1.23 — Murmr is free for anyone.
             match (ev, state) {
-                (HotkeyEvent::DictationDown, RecState::Idle) => {
+                (HotkeyEvent::DictationDown { pressed_at }, RecState::Idle) => {
+                    perf_log::append("[ctrl] DictationDown received → start_recording");
                     if let Err(e) = self.start_recording() {
+                        perf_log::append(&format!("[ctrl] start_recording failed: {e}"));
                         self.sounds.play_error_beep();
                         self.emit(Status::Error {
                             message: format!("failed to start recording: {e}"),
@@ -143,13 +145,20 @@ impl Controller {
                         continue;
                     }
                     state = RecState::HoldUncertain;
-                    press_at = Some(Instant::now());
+                    // Use the user-perceived press time, not Now. For bare-
+                    // modifier dictation the hotkey thread defers the
+                    // event by ~80ms; without this the tap-vs-hold logic
+                    // below sees every press as 80ms shorter than it
+                    // actually was, dropping marginal taps into Toggled
+                    // mode unexpectedly.
+                    press_at = Some(pressed_at);
                     self.emit(Status::Recording);
                     self.show_hud();
                     self.sounds.play_start_click();
                 }
 
-                (HotkeyEvent::DictationDown, RecState::Toggled) => {
+                (HotkeyEvent::DictationDown { .. }, RecState::Toggled) => {
+                    perf_log::append("[ctrl] DictationDown in Toggled → stop + transcribe");
                     state = RecState::Idle;
                     press_at = None;
                     // Stop sound fires on the user's action (the second tap),
@@ -164,6 +173,12 @@ impl Controller {
                     let tap_threshold_ms =
                         self.settings.get().tap_threshold_ms.max(MIN_TAP_THRESHOLD_MS);
                     let tap_threshold = Duration::from_millis(tap_threshold_ms as u64);
+                    perf_log::append(&format!(
+                        "[ctrl] DictationUp in HoldUncertain: elapsed={}ms, tap_threshold={}ms → {}",
+                        elapsed.as_millis(),
+                        tap_threshold_ms,
+                        if elapsed >= tap_threshold { "push-to-talk complete" } else { "Toggled" },
+                    ));
                     if elapsed >= tap_threshold {
                         state = RecState::Idle;
                         press_at = None;
@@ -177,6 +192,7 @@ impl Controller {
                 (HotkeyEvent::DictationUp, _) => {}
 
                 (HotkeyEvent::EscDown, RecState::HoldUncertain | RecState::Toggled) => {
+                    perf_log::append("[ctrl] EscDown → cancel recording");
                     let _ = self.recorder.cancel();
                     audio_duck::unduck();
                     state = RecState::Idle;
@@ -186,7 +202,7 @@ impl Controller {
                 }
 
                 (HotkeyEvent::EscDown, RecState::Idle) => {}
-                (HotkeyEvent::DictationDown, RecState::HoldUncertain) => {}
+                (HotkeyEvent::DictationDown { .. }, RecState::HoldUncertain) => {}
 
                 // Re-paste the most recent transcription. Ignored mid-recording
                 // (would interfere with the active dictation flow).
@@ -282,11 +298,13 @@ impl Controller {
         let cap = match self.recorder.stop() {
             Ok(Some(c)) => c,
             Ok(None) => {
+                perf_log::append("[ctrl] complete_recording: stop returned None (cancelled)");
                 self.emit(Status::Cancelled);
                 self.hide_hud();
                 return;
             }
             Err(e) => {
+                perf_log::append(&format!("[ctrl] complete_recording: stop failed: {e}"));
                 self.emit(Status::Error {
                     message: format!("stop failed: {e}"),
                 });
@@ -295,17 +313,28 @@ impl Controller {
             }
         };
 
+        // Always log a one-line summary of every recording so we can
+        // diagnose missing-transcription reports without the user having
+        // to repro under instrumentation. Includes duration, sample rate,
+        // channels, peak chunk RMS, and the VAD threshold for comparison.
+        let frames_total = cap.samples.len() as f64 / cap.channels.max(1) as f64;
+        let duration_ms_dbg = ((frames_total / cap.sample_rate.max(1) as f64) * 1000.0) as i64;
+        let peak = peak_chunk_rms(&cap.samples, cap.sample_rate);
+        perf_log::append(&format!(
+            "[ctrl] recording captured: {}ms, {} samples @ {}Hz x {}ch, peak chunk RMS {:.4} (VAD threshold {:.4})",
+            duration_ms_dbg,
+            cap.samples.len(),
+            cap.sample_rate,
+            cap.channels,
+            peak,
+            VAD_RMS_THRESHOLD,
+        ));
+
         // Energy-based VAD — bail out before invoking Whisper on silence.
         if !has_speech(&cap.samples, cap.sample_rate, VAD_RMS_THRESHOLD) {
-            // Log the peak chunk RMS so users hitting silent failures can
-            // see whether their mic is producing audio that's just below
-            // threshold — informs the next round of threshold tuning.
-            let peak = peak_chunk_rms(&cap.samples, cap.sample_rate);
             perf_log::append(&format!(
-                "[ctrl] VAD rejected: {} samples, peak chunk RMS {:.4} (threshold {:.4})",
-                cap.samples.len(),
-                peak,
-                VAD_RMS_THRESHOLD
+                "[ctrl] VAD rejected: peak chunk RMS {:.4} below threshold {:.4} → no transcription",
+                peak, VAD_RMS_THRESHOLD,
             ));
             self.emit(Status::Cancelled);
             self.hide_hud();

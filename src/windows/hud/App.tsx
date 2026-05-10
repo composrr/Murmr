@@ -7,11 +7,13 @@ import ResultPopup from './ResultPopup';
 
 const WAVEFORM_BARS = 13;
 
-/// RMS above this counts as "speaking right now." Tuned permissively so
-/// soft consonants and quieter syllables still register; the VAD-cancel
-/// threshold in the controller is stricter (silence detection cares about
-/// false positives, not under-counts).
-const SPEECH_RMS_THRESHOLD = 0.004;
+/// RMS above this counts as "speaking right now." Aligned with the
+/// controller's VAD threshold so the HUD word counter and the actual
+/// transcription gate agree on what's speech vs noise. The previous
+/// value (0.004) sat below typical room noise on many setups (especially
+/// users routing through VoiceMeeter or other virtual mixers), making the
+/// counter tick up at a constant rate even during pauses.
+const SPEECH_RMS_THRESHOLD = 0.015;
 
 /// Once we've started speaking, keep counting until we've seen this many ms
 /// of sustained sub-threshold audio. This makes natural between-word pauses

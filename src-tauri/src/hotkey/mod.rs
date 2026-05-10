@@ -103,7 +103,12 @@ impl Default for HotkeyConfig {
 
 #[derive(Debug, Clone, Copy)]
 pub enum HotkeyEvent {
-    DictationDown,
+    /// `pressed_at` is the moment the user physically pressed the key, NOT
+    /// when the controller received the event. The two diverge by ~80ms for
+    /// bare-modifier hotkeys (deferred commit) — without using the original
+    /// timestamp the controller's tap-vs-hold threshold ends up effectively
+    /// 80ms higher than the user configured.
+    DictationDown { pressed_at: Instant },
     DictationUp,
     EscDown,
     RepeatLast,
@@ -421,6 +426,13 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                 // hasn't been cancelled by a combo or by
                                 // an early release). Pass the modifier
                                 // through so the focused app sees it.
+                                //
+                                // We capture press_at NOW (the actual
+                                // user-perceived press time) and forward
+                                // it on the eventual DictationDown so the
+                                // controller's tap-vs-hold threshold is
+                                // measured against the real press, not the
+                                // delayed-commit moment.
                                 let press_at = Instant::now();
                                 {
                                     let mut pp = pending_for_cb.lock();
@@ -443,12 +455,21 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                         if pp.pressed_at == Some(press_at) && !pp.committed {
                                             pp.committed = true;
                                             drop(pp);
-                                            let _ = tx_for_thread.send(HotkeyEvent::DictationDown);
+                                            let _ = tx_for_thread.send(
+                                                HotkeyEvent::DictationDown { pressed_at: press_at },
+                                            );
+                                        } else {
+                                            crate::perf_log::append(
+                                                "[hotkey] bare-modifier dictation cancelled before commit (combo or early release)",
+                                            );
                                         }
                                     });
                                 (None, false)
                             } else {
-                                (Some(HotkeyEvent::DictationDown), true)
+                                (
+                                    Some(HotkeyEvent::DictationDown { pressed_at: Instant::now() }),
+                                    true,
+                                )
                             }
                         } else if cfg
                             .repeat
