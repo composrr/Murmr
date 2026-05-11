@@ -16,6 +16,25 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.36 — HUD post-boot recovery
+
+### Fixed
+
+- **HUD sometimes didn't appear when starting a recording after a
+  computer restart.** Required a Murmr restart to recover. Now
+  `show_hud` calls `unminimize` first (Windows can restore the
+  previous session's minimized state on cold boot) and verifies the
+  window is actually visible after `show()`, retrying once if not.
+
+### Improved
+
+- **HUD diagnostics in `perf.log`.** Every step that previously
+  failed silently (window missing, positioning failures, show
+  errors, `set_always_on_top` errors) now writes a single line.
+  Next time the HUD misbehaves we'll know which step failed.
+
+---
+
 ## v0.1.35 — Escape works again, word counter accuracy
 
 ### Fixed
