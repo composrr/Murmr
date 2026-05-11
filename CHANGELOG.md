@@ -16,6 +16,33 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.37 — Mac install walkthrough
+
+### New
+
+- **`MAC-INSTALL.md` install guide.** Murmr ships unsigned (no Apple
+  Developer account behind it), so first-time Mac installs hit
+  Gatekeeper's "damaged" rejection from the browser's quarantine
+  flag. The new guide walks friends through the one-line `xattr`
+  fix and the three macOS permissions Murmr needs (Input Monitoring,
+  Microphone, Accessibility) — including which ones require
+  quitting and reopening Murmr to take effect. Linked from every
+  Release page so it's the first thing visible.
+- **In-app Mac permissions step in onboarding.** New step (Mac-only)
+  shows three cards explaining what each permission does, when
+  macOS will prompt, and a one-click "Open in System Settings"
+  button that deep-links to the exact pane in Privacy & Security.
+  Windows users still see the existing flow with no extra step.
+
+### Improved
+
+- **GitHub Releases body now lists the right asset filename per
+  platform** above the auto-generated commit history, so anyone
+  landing on a Releases page knows immediately which `.dmg` /
+  `.exe` to download.
+
+---
+
 ## v0.1.36 — HUD post-boot recovery
 
 ### Fixed
