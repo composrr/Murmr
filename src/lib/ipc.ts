@@ -272,6 +272,22 @@ export function launchAtLoginActive(): Promise<boolean> {
   return invoke<boolean>('launch_at_login_active');
 }
 
+// ----- macOS Privacy & Security deep links -----
+
+export type MacPrefPane = 'microphone' | 'accessibility' | 'input-monitoring';
+
+/// Open System Settings → Privacy & Security to a specific pane on macOS.
+/// No-op on Windows / Linux.
+export function openMacPrefPane(pane: MacPrefPane): Promise<void> {
+  return invoke<void>('open_macos_pref_pane', { pane });
+}
+
+// ----- Platform detection helper -----
+
+export function isMac(): boolean {
+  return /Mac|iPhone|iPad/i.test(navigator.userAgent);
+}
+
 export function purgeOlderTranscriptions(): Promise<number> {
   return invoke<number>('purge_older_transcriptions');
 }

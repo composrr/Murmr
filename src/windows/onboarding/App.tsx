@@ -1,21 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useTheme } from '../../hooks/useTheme';
-import { completeOnboarding } from '../../lib/ipc';
+import { completeOnboarding, isMac } from '../../lib/ipc';
 import Welcome from './steps/Welcome';
 import Name from './steps/Name';
+import MacPermissions from './steps/MacPermissions';
 import MicTest from './steps/MicTest';
 import Done from './steps/Done';
 
 // The mic-test screen already verifies end-to-end (mic → Whisper → text), so
 // a separate "try it out" step would just be a duplicate. We jump straight
 // to the celebratory Done screen after the test.
-const STEPS = [
-  { key: 'welcome', component: Welcome },
-  { key: 'name', component: Name },
-  { key: 'mic-test', component: MicTest },
-  { key: 'done', component: Done },
+//
+// The Mac permissions step is only shown on macOS — Windows permissions are
+// either silent (mic, after a one-time UAC prompt) or automatic, while Mac
+// requires Input Monitoring + Accessibility grants in System Settings before
+// the hotkey + paste injection actually work. We slot it BEFORE the mic
+// test so users have heard the heads-up about the post-grant restart by the
+// time they hit the test.
+const ALL_STEPS = [
+  { key: 'welcome', component: Welcome, macOnly: false },
+  { key: 'name', component: Name, macOnly: false },
+  { key: 'mac-permissions', component: MacPermissions, macOnly: true },
+  { key: 'mic-test', component: MicTest, macOnly: false },
+  { key: 'done', component: Done, macOnly: false },
 ] as const;
+
+const STEPS = ALL_STEPS.filter((s) => !s.macOnly || isMac());
 
 export type StepProps = {
   index: number;

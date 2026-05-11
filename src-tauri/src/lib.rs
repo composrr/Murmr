@@ -352,6 +352,39 @@ fn launch_at_login_active(app: AppHandle) -> Result<bool, String> {
         .map_err(|e| format!("query autostart: {e}"))
 }
 
+/// Open a specific pane of System Settings → Privacy & Security on macOS.
+/// `pane` should be one of: "microphone", "accessibility", "input-monitoring".
+/// On non-macOS platforms this is a no-op (frontend only calls it when
+/// platform === 'macos').
+#[tauri::command]
+#[allow(unused_variables)]
+fn open_macos_pref_pane(pane: String, app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_opener::OpenerExt;
+        // The `x-apple.systempreferences:` URL scheme is the documented way
+        // to deep-link into a specific preference pane on macOS 13+. The
+        // anchor (`?Privacy_X`) targets a specific row inside Privacy &
+        // Security. macOS 14 renamed several anchors; we use the older
+        // names because they still work on 13–15 (Apple kept aliases).
+        let url = match pane.as_str() {
+            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            "input-monitoring" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+            other => return Err(format!("unknown pref pane: {other}")),
+        };
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| format!("open pref pane: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Silently succeed on non-Mac so the frontend can call this
+        // unconditionally without branching.
+        Ok(())
+    }
+}
+
 #[tauri::command]
 fn purge_older_transcriptions(state: State<'_, AppState>) -> Result<usize, String> {
     let days = state.settings.get().retention_days as i64;
@@ -867,6 +900,7 @@ pub fn run() {
             set_practice_mode,
             set_launch_at_login,
             launch_at_login_active,
+            open_macos_pref_pane,
             purge_older_transcriptions,
             clear_last_24_hours,
             clear_all_transcriptions,

@@ -279,6 +279,41 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Murmr ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
+          # `body` is rendered ABOVE the auto-generated commit-history notes
+          # by softprops/action-gh-release. We use it to put platform install
+          # instructions front-and-center on every release page — friends
+          # downloading via this URL see the right .dmg/.exe filenames AND
+          # the macOS xattr workaround without having to dig.
+          body: |
+            ## Download
+
+            - **Windows**: `Murmr_${{ steps.ver.outputs.version }}_x64-setup.exe`
+            - **Mac (Apple Silicon)**: `Murmr_${{ steps.ver.outputs.version }}_aarch64.dmg`
+            - **Mac (Intel)**: `Murmr_${{ steps.ver.outputs.version }}_x64.dmg`
+
+            ### Mac install — important
+
+            Murmr isn't code-signed (no Apple Developer account behind a free
+            project). After downloading the `.dmg` and dragging Murmr into
+            `/Applications`, macOS will say "Murmr is damaged and can't be
+            opened." It's not — that's Gatekeeper rejecting the quarantine
+            flag your browser added on download. One Terminal command fixes
+            it:
+
+            ```
+            xattr -cr /Applications/Murmr.app
+            ```
+
+            Then double-click Murmr in Applications. You'll then need to
+            grant three permissions (Input Monitoring, Microphone,
+            Accessibility) — the in-app onboarding walks you through it.
+
+            **Full Mac install guide**:
+            [MAC-INSTALL.md](https://github.com/composrr/Murmr/blob/main/MAC-INSTALL.md)
+
+            ---
+
+            ## Changes
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
