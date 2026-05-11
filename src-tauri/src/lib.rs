@@ -788,7 +788,7 @@ pub fn run() {
     };
     perf_log::append("[startup] state ready, starting Tauri builder");
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Manage state at BUILDER time so it's registered before any window
         // exists. Doing this in setup() races with WebView load — IPC calls
         // can fire before setup() returns.
@@ -797,8 +797,18 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
-        ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        ));
+
+    // Auto-updater: disabled on macOS until the app is properly code-signed
+    // with an Apple Developer ID. Each ad-hoc-signed rebuild produces a new
+    // cdhash, and macOS silently invalidates the user's Accessibility +
+    // Input Monitoring grants on every update — so each "update" leaves
+    // dictation dead until the user manually re-adds Murmr in System
+    // Settings. Windows is unaffected.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {

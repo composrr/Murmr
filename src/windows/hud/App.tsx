@@ -13,7 +13,15 @@ const WAVEFORM_BARS = 13;
 /// value (0.004) sat below typical room noise on many setups (especially
 /// users routing through VoiceMeeter or other virtual mixers), making the
 /// counter tick up at a constant rate even during pauses.
-const SPEECH_RMS_THRESHOLD = 0.015;
+///
+/// On macOS, built-in MacBook mics record significantly quieter than the
+/// headset/desktop mics 0.015 was tuned for — normal speech often lands
+/// in the 0.001-0.01 range. Use a Mac-specific value so the word counter
+/// responds to typical dictation volume.
+const IS_MAC =
+  typeof navigator !== 'undefined' &&
+  /Mac/i.test(navigator.platform || navigator.userAgent || '');
+const SPEECH_RMS_THRESHOLD = IS_MAC ? 0.001 : 0.015;
 
 /// Once we've started speaking, keep counting until we've seen this many ms
 /// of sustained sub-threshold audio. This makes natural between-word pauses
