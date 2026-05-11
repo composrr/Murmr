@@ -490,6 +490,15 @@ impl Controller {
     /// 4. bottom-center of the primary monitor
     fn show_hud(&self) {
         let Some(hud) = self.app.get_webview_window("hud") else {
+            // Tauri creates the HUD from tauri.conf.json at startup. If
+            // it's missing here, window creation failed silently — most
+            // likely a webview-init race during a post-boot launch.
+            // Restarting Murmr always recreates it cleanly; logging it
+            // here makes the bug visible the next time it happens so we
+            // can decide whether to add explicit recreation logic.
+            perf_log::append(
+                "[hud] show_hud: get_webview_window('hud') returned None — window missing",
+            );
             return;
         };
 
@@ -505,10 +514,44 @@ impl Controller {
             })
             .or_else(|| position_hud_bottom_center(&hud).ok().map(|_| "screen"));
 
-        eprintln!("[hud] positioned via {}", placement.unwrap_or("(failed)"));
+        match placement {
+            Some(via) => perf_log::append(&format!("[hud] positioned via {via}")),
+            None => perf_log::append(
+                "[hud] all positioning strategies failed — HUD will appear at last known position",
+            ),
+        }
 
-        let _ = hud.show();
-        let _ = hud.set_always_on_top(true);
+        // Defensive recovery: undo any window state that could leave the
+        // HUD invisible from a prior session — minimized (post-boot we've
+        // seen Windows restore the previous session's minimized state),
+        // not on top, or hidden. Errors are logged but non-fatal.
+        if let Err(e) = hud.unminimize() {
+            perf_log::append(&format!("[hud] unminimize failed: {e}"));
+        }
+        if let Err(e) = hud.show() {
+            perf_log::append(&format!("[hud] show failed: {e}"));
+        }
+        if let Err(e) = hud.set_always_on_top(true) {
+            perf_log::append(&format!("[hud] set_always_on_top failed: {e}"));
+        }
+
+        // Verify the show actually took. If the window reports invisible
+        // after we asked it to show, that's the post-boot bug — log it
+        // and call show() once more. We deliberately do NOT call
+        // set_focus here: the HUD must never steal focus from the user's
+        // text field or text injection lands in the wrong window.
+        match hud.is_visible() {
+            Ok(true) => {}
+            Ok(false) => {
+                perf_log::append(
+                    "[hud] is_visible == false after show() — retrying once",
+                );
+                if let Err(e) = hud.show() {
+                    perf_log::append(&format!("[hud] retry show failed: {e}"));
+                }
+            }
+            Err(e) => perf_log::append(&format!("[hud] is_visible query failed: {e}")),
+        }
     }
 
     fn hide_hud(&self) {
