@@ -740,6 +740,37 @@ pub fn run() {
     perf_log::append("[startup] Murmr launching");
     perf_log::append(&format!("[startup] app_data_dir = {:?}", app_data_dir));
     perf_log::append(&format!(
+        "[startup] version={} target_os={}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+    ));
+
+    // Install a panic hook so unexpected panics on background threads —
+    // audio callbacks, hotkey grab thread, controller, transcribe worker —
+    // leave a footprint in perf.log instead of vanishing into a silent
+    // process abort. With `panic = "abort"` in Cargo.toml the process dies
+    // immediately after the hook runs, so this is our only chance to
+    // capture diagnostic info.
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "<unknown>".into());
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<no message>");
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        perf_log::append(&format!(
+            "[panic] thread={thread} location={location} msg={msg:?}"
+        ));
+    }));
+    perf_log::append(&format!(
         "[startup] OMP_NUM_THREADS={} OMP_DYNAMIC={}",
         std::env::var("OMP_NUM_THREADS").unwrap_or_default(),
         std::env::var("OMP_DYNAMIC").unwrap_or_default()
