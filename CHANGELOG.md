@@ -16,6 +16,45 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.39 — Crash diagnostics
+
+### Fixed
+
+- Adds a panic hook so unexpected crashes on background threads
+  (audio, hotkey, controller, transcribe) leave a `[panic]` line in
+  `perf.log` with the thread name, source location, and message
+  before the process aborts. Previously these crashes vanished
+  silently. Doesn't change runtime behavior — purely diagnostic so
+  the next "crashed when I pressed dictation" report has actionable
+  info attached.
+
+### Improved
+
+- Startup `perf.log` now records the running version + target OS so
+  it's obvious which build a user is on when they share a log.
+
+---
+
+## v0.1.38 — Mac auto-updater disabled, Mac word counter accuracy
+
+### Fixed
+
+- **macOS auto-updater disabled** until the app is properly
+  code-signed with an Apple Developer ID. Each ad-hoc-signed rebuild
+  produces a new cdhash, and macOS silently invalidates the user's
+  Accessibility + Input Monitoring grants on every update — so
+  every "update" was leaving Mac dictation dead until the user
+  manually re-added Murmr in System Settings. Updates on Mac are now
+  manual (download a fresh `.dmg` from the Releases page). Windows
+  is unaffected; the auto-updater still works there.
+- **Mac HUD word counter** now uses a much lower speech threshold
+  (0.001 vs 0.015) to match the Mac VAD threshold. Built-in
+  MacBook mics record significantly quieter than the
+  Windows-tuned default; the counter wasn't ticking on normal
+  speaking volume.
+
+---
+
 ## v0.1.37 — Mac install walkthrough
 
 ### New
