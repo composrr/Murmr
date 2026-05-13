@@ -16,6 +16,26 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.40 — Audio duck recovery
+
+### Fixed
+
+- **Per-app volumes no longer get stranded low when Murmr stops
+  mid-recording.** The audio-duck logic lowers each app's session
+  volume during dictation and restores it when recording ends; if
+  Murmr quit (or crashed) before the restore step ran, your game /
+  Spotify / Discord stayed dimmed until you fixed it manually in
+  Volume Mixer. Two new recovery paths:
+  - Graceful exit (tray Quit, window close, OS shutdown) now fires
+    a `RunEvent::Exit` handler that calls `unduck()` unconditionally.
+  - The panic hook (added v0.1.39) also calls `unduck()` before the
+    abort, so background-thread crashes restore audio too.
+  The only failure mode left is killing Murmr via Task Manager —
+  if that shows up in the wild we can add a force-unduck on next
+  startup.
+
+---
+
 ## v0.1.39 — Crash diagnostics
 
 ### Fixed
