@@ -750,7 +750,8 @@ pub fn run() {
     // leave a footprint in perf.log instead of vanishing into a silent
     // process abort. With `panic = "abort"` in Cargo.toml the process dies
     // immediately after the hook runs, so this is our only chance to
-    // capture diagnostic info.
+    // capture diagnostic info AND restore any audio sessions we ducked
+    // (otherwise the user's per-app volumes stay stuck low after a crash).
     std::panic::set_hook(Box::new(|info| {
         let location = info
             .location()
@@ -769,6 +770,12 @@ pub fn run() {
         perf_log::append(&format!(
             "[panic] thread={thread} location={location} msg={msg:?}"
         ));
+        // Best-effort recovery before abort. Wrapped in catch_unwind so a
+        // panic INSIDE the hook (e.g. COM in a bad state) doesn't deadlock
+        // or trigger a recursive abort.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            audio_duck::unduck();
+        }));
     }));
     perf_log::append(&format!(
         "[startup] OMP_NUM_THREADS={} OMP_DYNAMIC={}",
@@ -946,6 +953,18 @@ pub fn run() {
             clear_last_24_hours,
             clear_all_transcriptions,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Restore any audio sessions Murmr left ducked. Without this,
+            // quitting Murmr mid-recording — or even after a clean stop, if
+            // the controller's unduck path was skipped for any reason —
+            // strands per-app volumes at the ducked level until the user
+            // notices and fixes them by hand. Fires on graceful exit (tray
+            // quit, window close, OS shutdown).
+            if matches!(event, tauri::RunEvent::Exit) {
+                perf_log::append("[shutdown] RunEvent::Exit → unducking audio sessions");
+                audio_duck::unduck();
+            }
+        });
 }
