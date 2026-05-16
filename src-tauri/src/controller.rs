@@ -552,6 +552,22 @@ impl Controller {
             }
             Err(e) => perf_log::append(&format!("[hud] is_visible query failed: {e}")),
         }
+
+        // Bounds sanity check. If our positioning chain (or a prior
+        // session's saved position) put the HUD outside every connected
+        // monitor's working area — multi-monitor unplug, scale change,
+        // UIA returning bogus coords for a fullscreen game's focus, etc.
+        // — fall back to the guaranteed-visible bottom-center placement.
+        // Without this, the HUD is "shown" but invisible to the user, which
+        // they understandably read as "HUD missing."
+        if !hud_within_any_monitor(&hud) {
+            perf_log::append(
+                "[hud] window position is outside every monitor — snapping to screen bottom-center",
+            );
+            if let Err(e) = position_hud_bottom_center(&hud) {
+                perf_log::append(&format!("[hud] fallback positioning failed: {e}"));
+            }
+        }
     }
 
     fn hide_hud(&self) {
@@ -631,6 +647,54 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) -> Result<(), String> 
     hud.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// True when at least one corner of the HUD window overlaps a connected
+/// monitor's physical bounds. Used as a sanity check before we conclude
+/// the HUD was successfully shown — `show()` returning Ok and
+/// `is_visible() == true` aren't sufficient if the window's position is
+/// off the desktop entirely (multi-monitor unplug, UIA returning bad
+/// coords for a fullscreen game's "focused element," etc).
+fn hud_within_any_monitor(hud: &tauri::WebviewWindow) -> bool {
+    let pos = match hud.outer_position() {
+        Ok(p) => p,
+        Err(e) => {
+            perf_log::append(&format!("[hud] outer_position query failed: {e}"));
+            return true; // can't verify — give the benefit of the doubt
+        }
+    };
+    let size = match hud.outer_size() {
+        Ok(s) => s,
+        Err(e) => {
+            perf_log::append(&format!("[hud] outer_size query failed: {e}"));
+            return true;
+        }
+    };
+    let monitors = match hud.available_monitors() {
+        Ok(m) => m,
+        Err(e) => {
+            perf_log::append(&format!("[hud] available_monitors query failed: {e}"));
+            return true;
+        }
+    };
+    if monitors.is_empty() {
+        return true; // headless / weird setup — don't second-guess
+    }
+    let win_left = pos.x;
+    let win_top = pos.y;
+    let win_right = pos.x + size.width as i32;
+    let win_bottom = pos.y + size.height as i32;
+    monitors.iter().any(|m| {
+        let mpos = m.position();
+        let msize = m.size();
+        let mleft = mpos.x;
+        let mtop = mpos.y;
+        let mright = mpos.x + msize.width as i32;
+        let mbottom = mpos.y + msize.height as i32;
+        // AABB overlap test — any pixel of the window inside any pixel of
+        // the monitor counts as "visible enough to find."
+        win_left < mright && win_right > mleft && win_top < mbottom && win_bottom > mtop
+    })
 }
 
 /// Inset above the bottom edge of the foreground window where the HUD floats

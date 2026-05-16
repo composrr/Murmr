@@ -385,6 +385,12 @@ struct PendingPress {
 /// dictation. Push-to-talk loses 80ms at the start of the recording — a
 /// negligible cost for keeping system shortcuts working.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
+    crate::perf_log::append(&format!(
+        "[hotkey] installing OS keyboard hook (dictation={:?}, cancel={:?}, repeat={:?})",
+        initial_config.dictation.key,
+        initial_config.cancel.key,
+        initial_config.repeat.map(|c| c.key),
+    ));
     *config_handle().write() = initial_config;
 
     let modifiers = ModifierState::default();
@@ -393,11 +399,23 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     let pending = Arc::new(Mutex::new(PendingPress::default()));
     let pending_for_cb = pending.clone();
     let tx_for_cb = tx.clone();
+    let first_event_seen = Arc::new(AtomicBool::new(false));
+    let first_event_for_cb = first_event_seen.clone();
 
     std::thread::Builder::new()
         .name("murmr-hotkey".into())
         .spawn(move || {
             let result = grab(move |event: Event| -> Option<Event> {
+                // One-shot sanity log so we can tell from perf.log whether
+                // the OS hook is actually delivering events (if this never
+                // fires, another app's hook may have refused us, or we're
+                // running on a session without keyboard access — RDP idle,
+                // locked workstation, etc).
+                if !first_event_for_cb.swap(true, Ordering::Relaxed) {
+                    crate::perf_log::append(
+                        "[hotkey] first keyboard event received — hook is live",
+                    );
+                }
                 let cfg = *cfg_for_cb.read();
                 let dict_is_bare_mod = chord_is_bare_modifier(&cfg.dictation);
 
@@ -560,7 +578,13 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
             });
             if let Err(e) = result {
                 eprintln!("[hotkey] rdev grab error: {e:?}");
+                crate::perf_log::append(&format!("[hotkey] rdev grab returned error: {e:?}"));
             }
+            // The grab loop only exits when the OS uninstalls our hook
+            // (extremely rare during normal operation) or rdev errors.
+            // Either way, log it — hotkeys will silently stop working
+            // afterwards, which would otherwise be very confusing.
+            crate::perf_log::append("[hotkey] grab() returned — keyboard hook is no longer active");
         })
         .expect("failed to spawn hotkey thread");
 }
