@@ -16,6 +16,29 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.41 — HUD never lands off-screen
+
+### Fixed
+
+- **HUD no longer goes invisible when its position lands outside
+  every monitor.** Multi-monitor unplugs, scale-factor changes, and
+  bogus focused-element coordinates from fullscreen games could
+  leave the HUD "successfully shown" but positioned where the user
+  couldn't see it. Murmr now verifies the HUD window overlaps at
+  least one connected monitor; if not, it snaps to the
+  guaranteed-visible bottom-center placement before returning.
+
+### Improved
+
+- **Hotkey hook telemetry in `perf.log`.** Startup logs the
+  configured chords; the first keyboard event delivered to our hook
+  writes a one-shot `[hotkey] first keyboard event received — hook
+  is live` line; if `rdev::grab()` ever returns (which silently
+  kills hotkeys), we log that too. Makes "my keyboard feels weird"
+  reports diagnosable from the log alone.
+
+---
+
 ## v0.1.40 — Audio duck recovery
 
 ### Fixed
