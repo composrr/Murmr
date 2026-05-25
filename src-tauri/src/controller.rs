@@ -19,7 +19,10 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::Receiver;
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 use crate::audio::{self, Recorder};
 use crate::audio_duck;
@@ -489,17 +492,28 @@ impl Controller {
     /// 3. bottom of the foreground window
     /// 4. bottom-center of the primary monitor
     fn show_hud(&self) {
-        let Some(hud) = self.app.get_webview_window("hud") else {
-            // Tauri creates the HUD from tauri.conf.json at startup. If
-            // it's missing here, window creation failed silently — most
-            // likely a webview-init race during a post-boot launch.
-            // Restarting Murmr always recreates it cleanly; logging it
-            // here makes the bug visible the next time it happens so we
-            // can decide whether to add explicit recreation logic.
-            perf_log::append(
-                "[hud] show_hud: get_webview_window('hud') returned None — window missing",
-            );
-            return;
+        let hud = match self.app.get_webview_window("hud") {
+            Some(h) => h,
+            None => {
+                // Tauri normally creates the HUD from tauri.conf.json at
+                // startup, but on post-boot launches (auto-start via the
+                // Windows Run key while the session is still warming up)
+                // window creation races with WebView2 init and can fail
+                // silently. Previously the user had to quit + relaunch
+                // Murmr to recover. Now we re-create the HUD on the spot.
+                perf_log::append(
+                    "[hud] window missing at show_hud time — recreating via WebviewWindowBuilder",
+                );
+                match create_hud_window(&self.app) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        perf_log::append(&format!(
+                            "[hud] recreation failed: {e} — dictation will proceed without a HUD this round",
+                        ));
+                        return;
+                    }
+                }
+            }
         };
 
         let placement = focus::uia_focused_element_rect()
@@ -647,6 +661,32 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) -> Result<(), String> 
     hud.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Build the HUD window from scratch with the same config as
+/// `tauri.conf.json`'s `[windows]` entry. Used when the initial
+/// startup creation race lost — typically Windows auto-start where the
+/// post-boot WebView2 init wasn't ready when Tauri's setup() ran.
+///
+/// Keep this in sync with the `"label": "hud"` block in tauri.conf.json.
+/// We can't read that JSON back at runtime (it's compiled away), so the
+/// two are mirrors of each other.
+fn create_hud_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    let win = WebviewWindowBuilder::new(app, "hud", WebviewUrl::App("hud.html".into()))
+        .title("Murmr HUD")
+        .inner_size(380.0, 76.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .visible(false)
+        .focused(false)
+        .shadow(false)
+        .build()
+        .map_err(|e| format!("WebviewWindowBuilder build failed: {e}"))?;
+    perf_log::append("[hud] recreated successfully");
+    Ok(win)
 }
 
 /// True when at least one corner of the HUD window overlaps a connected

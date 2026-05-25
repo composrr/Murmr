@@ -956,15 +956,44 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {
-            // Restore any audio sessions Murmr left ducked. Without this,
-            // quitting Murmr mid-recording — or even after a clean stop, if
-            // the controller's unduck path was skipped for any reason —
-            // strands per-app volumes at the ducked level until the user
-            // notices and fixes them by hand. Fires on graceful exit (tray
-            // quit, window close, OS shutdown).
-            if matches!(event, tauri::RunEvent::Exit) {
-                perf_log::append("[shutdown] RunEvent::Exit → unducking audio sessions");
-                audio_duck::unduck();
+            match event {
+                // Intercept the window-close button. On macOS we run as an
+                // LSUIElement (no Dock icon), so closing the main window
+                // would otherwise also remove Murmr's only visible
+                // presence besides the menu-bar tray icon — which feels
+                // like a quit even though we're still running. Hiding
+                // instead is what every Mac menu-bar app does (Slack tray
+                // mode, WhisperFlow, Maccy, etc). The user explicitly
+                // quits via the tray icon's "Quit Murmr" item, which
+                // triggers RunEvent::Exit below.
+                //
+                // We apply the same close-to-hide behavior on Windows for
+                // consistency with the tray-icon model; clicking the
+                // tray icon brings the window back.
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
+                    ..
+                } if label == "main" => {
+                    api.prevent_close();
+                    if let Some(main) = _app.get_webview_window("main") {
+                        let _ = main.hide();
+                    }
+                    perf_log::append("[lifecycle] main window close intercepted → hidden (use tray to quit)");
+                }
+
+                // Restore any audio sessions Murmr left ducked. Without this,
+                // quitting Murmr mid-recording — or even after a clean stop, if
+                // the controller's unduck path was skipped for any reason —
+                // strands per-app volumes at the ducked level until the user
+                // notices and fixes them by hand. Fires on graceful exit (tray
+                // quit, window close, OS shutdown).
+                tauri::RunEvent::Exit => {
+                    perf_log::append("[shutdown] RunEvent::Exit → unducking audio sessions");
+                    audio_duck::unduck();
+                }
+
+                _ => {}
             }
         });
 }

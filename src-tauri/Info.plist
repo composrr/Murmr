@@ -23,13 +23,19 @@
 
     <!--
         Background-friendly app:
-          - LSUIElement = true     no Dock icon (we live in the menu bar)
-          - LSBackgroundOnly = false  still receive mouse / kb events
-        Set LSUIElement=false for now so the user can find the main window
-        from the Dock; we can revisit once the menu bar item is the primary
-        interaction point.
+          - LSUIElement = true → no Dock icon, no application menu bar.
+            Murmr lives in the menu bar tray instead. Closing the main
+            window doesn't quit the app (paired with the on_window_event
+            close-to-hide handler in lib.rs); the user explicitly quits
+            via the tray icon's Quit item.
+          - LSBackgroundOnly = false (default) → still receive keyboard /
+            mouse / window-focus events so the global hotkey + main
+            window interaction continue to work.
+
+        Matches how WhisperFlow, Rectangle, Maccy, etc. behave on macOS —
+        accessory apps that the user manages from the menu bar.
     -->
     <key>LSUIElement</key>
-    <false/>
+    <true/>
 </dict>
 </plist>
