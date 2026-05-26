@@ -16,6 +16,25 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.42 — Mac dock-free + Windows HUD post-boot recovery
+
+### Fixed
+
+- **Windows HUD now works on the first dictation after a system
+  reboot.** When Murmr auto-starts during a cold boot, the WebView2
+  runtime races with the HUD window creation, and Tauri's startup
+  sometimes lost. Previously the user had to quit + relaunch Murmr to
+  recover. Now Murmr recreates the HUD via `WebviewWindowBuilder` on
+  the spot the first time it tries to show it and finds it missing.
+
+- **Mac: Murmr no longer appears in the Dock.** It now runs as a true
+  accessory app (`LSUIElement` = true) — menu-bar-only, no Dock icon,
+  no application menu. Matches how WhisperFlow, Maccy, Rectangle, etc.
+  behave on macOS. Closing the main window hides it instead of
+  quitting; use the menu-bar tray's "Quit Murmr" to actually quit.
+
+---
+
 ## v0.1.41 — HUD never lands off-screen
 
 ### Fixed
