@@ -12,18 +12,29 @@
 //!   all do the same thing. Works regardless of routing topology.
 //!
 //! State management:
-//!   On `duck()` we save `(process_id → original_volume)` for every session
-//!   we touched. `unduck()` re-enumerates and restores by process_id, so a
-//!   process that opened a NEW audio stream after `duck()` doesn't get
-//!   restored to "1.0" — it keeps whatever it currently has.
+//!   On `duck()` we save `(session_instance_id → original_volume)` for
+//!   every session we touched. `unduck()` re-enumerates and restores by
+//!   session_instance_id. Keying by session ID (not process ID) is
+//!   critical — apps like Chrome, Discord, Slack, OBS routinely have
+//!   MULTIPLE audio sessions per process (one per browser tab, one per
+//!   voice channel, plus notification sounds). Keying by PID meant the
+//!   last session enumerated overwrote all the others' saved values, so
+//!   `unduck()` restored every session of those apps to whichever single
+//!   value happened to win the race — leaving some sessions stuck below
+//!   their original volume. Fixed in v0.1.44.
 //!
-//!   Sessions whose process exited between duck/unduck just disappear from
-//!   the enumeration and are silently dropped.
+//!   Sessions whose process / session exited between duck/unduck just
+//!   disappear from the enumeration and are silently dropped (no harm —
+//!   the session is gone, there's nothing to restore).
+//!
+//!   Sessions that came into existence AFTER `duck()` (e.g. you opened
+//!   YouTube mid-dictation) are not in our saved map → we leave them at
+//!   whatever volume they currently have. Correct: they were never ducked.
 
 use std::collections::HashMap;
 
 use parking_lot::Mutex;
-use windows::core::Interface;
+use windows::core::{Interface, PWSTR};
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
     ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -35,9 +46,9 @@ use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
 use crate::perf_log;
 
-/// process_id → original volume (0.0–1.0) at the time we ducked. Cleared
-/// each `unduck()`.
-static SAVED_VOLUMES: Mutex<Option<HashMap<u32, f32>>> = Mutex::new(None);
+/// session_instance_id (unique per audio session, stable for its lifetime) →
+/// original volume (0.0–1.0) at the time we ducked. Cleared each `unduck()`.
+static SAVED_VOLUMES: Mutex<Option<HashMap<String, f32>>> = Mutex::new(None);
 
 /// Per-thread COM init. Re-entry on the same thread is harmless (returns
 /// S_FALSE for matching apartment, RPC_E_CHANGED_MODE for a flip).
@@ -59,11 +70,30 @@ fn current_process_id() -> u32 {
     unsafe { GetCurrentProcessId() }
 }
 
+/// Read a `PWSTR` returned by a COM call into an owned `String`. Returns
+/// an empty string if the pointer is null. Used for session instance IDs.
+unsafe fn pwstr_to_string(ptr: PWSTR) -> String {
+    if ptr.is_null() {
+        return String::new();
+    }
+    let mut len = 0;
+    while *ptr.0.add(len) != 0 {
+        len += 1;
+    }
+    let slice = std::slice::from_raw_parts(ptr.0, len);
+    String::from_utf16_lossy(slice)
+}
+
 /// Walk every active render device, every active session on each device.
-/// `f` is called with (process_id, simple_audio_volume) for each non-Murmr
-/// session — short-circuits on COM errors at the device level so one bad
-/// device doesn't kill the whole walk.
-fn for_each_session<F: FnMut(u32, &ISimpleAudioVolume)>(mut f: F) {
+/// `f` is called with (session_instance_id, simple_audio_volume) for each
+/// non-Murmr session. The instance ID is what we key saved volumes by —
+/// it's unique per session (NOT per process), so apps with multiple
+/// sessions per PID (Chrome tabs, Discord channels, OBS scenes, etc.) get
+/// their volumes saved + restored individually.
+///
+/// Short-circuits on COM errors at the device level so one bad device
+/// doesn't kill the whole walk.
+fn for_each_session<F: FnMut(&str, &ISimpleAudioVolume)>(mut f: F) {
     let our_pid = current_process_id();
 
     unsafe {
@@ -120,7 +150,8 @@ fn for_each_session<F: FnMut(u32, &ISimpleAudioVolume)>(mut f: F) {
                     Err(_) => continue,
                 };
 
-                // Get extended interface so we can read process_id.
+                // Get extended interface so we can read process_id +
+                // session instance identifier.
                 let control2: IAudioSessionControl2 = match control.cast() {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -132,12 +163,25 @@ fn for_each_session<F: FnMut(u32, &ISimpleAudioVolume)>(mut f: F) {
                     continue;
                 }
 
+                // The session instance ID is unique per session for its
+                // entire lifetime. If a session is destroyed + recreated
+                // it gets a NEW id, which is what we want — the new
+                // session was never ducked.
+                let session_id_ptr = match control2.GetSessionInstanceIdentifier() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                let session_id = pwstr_to_string(session_id_ptr);
+                if session_id.is_empty() {
+                    continue;
+                }
+
                 let vol: ISimpleAudioVolume = match control.cast() {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
 
-                f(pid, &vol);
+                f(&session_id, &vol);
             }
         }
     }
@@ -152,21 +196,23 @@ pub fn duck(amount: f32) {
         }
     }
 
-    let mut saved: HashMap<u32, f32> = HashMap::new();
+    let mut saved: HashMap<String, f32> = HashMap::new();
     let factor = (1.0 - amount).clamp(0.0, 1.0);
     let mut count = 0;
 
-    for_each_session(|pid, vol| {
+    for_each_session(|session_id, vol| {
         unsafe {
             let current = vol.GetMasterVolume().unwrap_or(1.0);
-            saved.insert(pid, current);
+            // Insert keyed by session id — never overwrites a previously-
+            // saved session, since each session has a unique id.
+            saved.insert(session_id.to_string(), current);
             let target = (current * factor).clamp(0.0, 1.0);
             // GUID context arg = caller's identifier so the OS can route
             // change-notifications back to us. Passing zero/null is fine
             // when we don't care.
             if let Err(e) = vol.SetMasterVolume(target, std::ptr::null()) {
                 perf_log::append(&format!(
-                    "[duck] pid={pid} SetMasterVolume failed: {e:?}"
+                    "[duck] session={session_id} SetMasterVolume failed: {e:?}"
                 ));
             } else {
                 count += 1;
@@ -191,11 +237,14 @@ pub fn unduck() {
     };
 
     let mut restored = 0;
-    for_each_session(|pid, vol| {
-        if let Some(original) = saved.get(&pid) {
+    let mut missing = 0;
+    for_each_session(|session_id, vol| {
+        if let Some(original) = saved.get(session_id) {
             unsafe {
                 if let Err(e) = vol.SetMasterVolume(*original, std::ptr::null()) {
-                    perf_log::append(&format!("[duck] pid={pid} restore failed: {e:?}"));
+                    perf_log::append(&format!(
+                        "[duck] session={session_id} restore failed: {e:?}"
+                    ));
                 } else {
                     restored += 1;
                 }
@@ -203,8 +252,16 @@ pub fn unduck() {
         }
     });
 
+    // Any session in `saved` that didn't show up in the unduck walk —
+    // its process or session was closed between duck and unduck. Nothing
+    // to restore, but log the count so a perf.log paste can show us if
+    // it's happening at unexpected rates.
+    if restored < saved.len() {
+        missing = saved.len() - restored;
+    }
     perf_log::append(&format!(
-        "[duck] restored {restored}/{} session(s)",
-        saved.len()
+        "[duck] restored {restored}/{} session(s) ({} missing — process/session ended)",
+        saved.len(),
+        missing,
     ));
 }
