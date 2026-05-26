@@ -16,6 +16,38 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.43 — Insights expansion + milestone notifications
+
+### New
+
+- **Trends section on the Insights page** with four new cards:
+  - **Speaking pace** — 12-week sparkline of your weekly average WPM,
+    with the delta vs the prior week called out next to the title.
+  - **Personal records** — three stat tiles for your all-time longest
+    dictation (by word count), longest by duration, and highest-WPM
+    session (50-word minimum so a quick 2-word burst doesn't dominate).
+  - **Filler progress** — month-over-month change in your top filler
+    ("um", "uh", etc.) — "38% less this month than last."
+  - **Where you dictate** — quiet, understated bar list of the top
+    apps you use Murmr in.
+- **Milestone notifications** (toggleable in Settings → Preferences →
+  Notifications). Rare-and-meaningful celebratory pop-ups: 1st / 100th
+  / 500th / 1000th / 5000th transcription, 10k / 100k / 1M words, 7 /
+  30 / 100-day streaks, and (throttled to once per week) a new
+  personal best on dictation length or WPM. Fires 4 seconds after a
+  successful inject so the notification doesn't compete with the text
+  the user just pasted; suppressed entirely when the focused window is
+  fullscreen-sized (probable game / video / DnD context).
+
+### Improved
+
+- New `filler_events` time-indexed log alongside the existing
+  cumulative `filler_counts` — lets the Insights page answer windowed
+  questions like "did you say 'um' less this month" without breaking
+  the existing filler card.
+
+---
+
 ## v0.1.42 — Mac dock-free + Windows HUD post-boot recovery
 
 ### Fixed
