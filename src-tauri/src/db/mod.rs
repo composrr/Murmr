@@ -14,6 +14,7 @@ use serde::Serialize;
 
 const SCHEMA_V1: &str = include_str!("schema/001_initial.sql");
 const SCHEMA_V2: &str = include_str!("schema/002_filler_counts.sql");
+const SCHEMA_V3: &str = include_str!("schema/003_milestones_and_filler_events.sql");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Transcription {
@@ -84,6 +85,12 @@ impl Db {
                 .map_err(|e| format!("apply schema v2: {e}"))?;
             conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
                 .map_err(|e| format!("record schema v2: {e}"))?;
+        }
+        if current_version < 3 {
+            conn.execute_batch(SCHEMA_V3)
+                .map_err(|e| format!("apply schema v3: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+                .map_err(|e| format!("record schema v3: {e}"))?;
         }
 
         Ok(())
@@ -621,6 +628,278 @@ impl Db {
         sorted.truncate(limit as usize);
         Ok(sorted)
     }
+
+    // ---------------------------------------------------------------------
+    // v0.1.43 Insights expansion: weekly WPM trend, personal records,
+    // app breakdown, time-windowed filler progress, milestone tracking.
+    // ---------------------------------------------------------------------
+
+    /// Per-week WPM averages over the last `weeks` calendar weeks (where
+    /// "week" is a 7-day chunk anchored at the latest data point and walked
+    /// backwards). Each entry's `week_start_ms` is the start of that bucket
+    /// in unix-ms; `avg_wpm` is total words / total speech minutes for the
+    /// bucket, with `None` for buckets that had no dictation.
+    pub fn weekly_wpm_trend(&self, weeks: i64) -> Result<Vec<WeekWpm>, String> {
+        let conn = self.conn.lock();
+        let now = unix_ms_now();
+        let week_ms = 7 * 86_400_000;
+        let mut out = Vec::with_capacity(weeks as usize);
+        for i in (0..weeks).rev() {
+            let end = now - i * week_ms;
+            let start = end - week_ms;
+            let (words, ms): (i64, i64) = conn
+                .query_row(
+                    "SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(duration_ms), 0)
+                     FROM transcriptions
+                     WHERE created_at >= ?1 AND created_at < ?2",
+                    params![start, end],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|e| format!("weekly_wpm_trend query: {e}"))?;
+            let avg_wpm = if ms > 0 {
+                Some(words as f64 / (ms as f64 / 60_000.0))
+            } else {
+                None
+            };
+            out.push(WeekWpm {
+                week_start_ms: start,
+                avg_wpm,
+                words,
+            });
+        }
+        Ok(out)
+    }
+
+    /// All-time best dictation by word count, duration, and WPM (with the
+    /// transcription that set each record). WPM record requires at least
+    /// 50 words to qualify so a 2-word burst at 600 WPM doesn't dominate.
+    pub fn personal_records(&self) -> Result<PersonalRecords, String> {
+        let conn = self.conn.lock();
+
+        let longest_words = conn
+            .query_row(
+                "SELECT id, text, word_count, duration_ms, target_app, created_at
+                 FROM transcriptions
+                 WHERE word_count > 0
+                 ORDER BY word_count DESC, created_at ASC
+                 LIMIT 1",
+                [],
+                row_to_transcription,
+            )
+            .ok();
+        let longest_duration = conn
+            .query_row(
+                "SELECT id, text, word_count, duration_ms, target_app, created_at
+                 FROM transcriptions
+                 WHERE duration_ms > 0
+                 ORDER BY duration_ms DESC, created_at ASC
+                 LIMIT 1",
+                [],
+                row_to_transcription,
+            )
+            .ok();
+        // SQLite doesn't have a clean way to compute the max of an expression
+        // without scanning. We pull the qualifying rows + their wpm in SQL,
+        // then take the first by ordering. Cheap up to a few million rows.
+        let highest_wpm = conn
+            .query_row(
+                "SELECT id, text, word_count, duration_ms, target_app, created_at
+                 FROM transcriptions
+                 WHERE word_count >= 50 AND duration_ms > 0
+                 ORDER BY (CAST(word_count AS REAL) / CAST(duration_ms AS REAL)) DESC,
+                          created_at ASC
+                 LIMIT 1",
+                [],
+                row_to_transcription,
+            )
+            .ok();
+        let highest_wpm_value = highest_wpm.as_ref().and_then(|t| {
+            if t.duration_ms > 0 {
+                Some(t.word_count as f64 / (t.duration_ms as f64 / 60_000.0))
+            } else {
+                None
+            }
+        });
+
+        Ok(PersonalRecords {
+            longest_words,
+            longest_duration,
+            highest_wpm,
+            highest_wpm_value,
+        })
+    }
+
+    /// Top apps the user dictates into, by transcription count. Returns
+    /// up to `limit` entries with each app's count + total speech time.
+    /// Rows with NULL target_app are bucketed as "Unknown".
+    pub fn app_breakdown(&self, limit: i64) -> Result<Vec<AppUsage>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT COALESCE(target_app, '(unknown)') AS app,
+                        COUNT(*) AS n,
+                        COALESCE(SUM(duration_ms), 0) AS total_ms
+                 FROM transcriptions
+                 GROUP BY app
+                 ORDER BY n DESC, app ASC
+                 LIMIT ?1",
+            )
+            .map_err(|e| format!("prepare app_breakdown: {e}"))?;
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok(AppUsage {
+                    app: row.get(0)?,
+                    transcription_count: row.get(1)?,
+                    total_speech_ms: row.get(2)?,
+                })
+            })
+            .map_err(|e| format!("query app_breakdown: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("collect app_breakdown: {e}"))
+    }
+
+    /// Compares the user's top filler word's count in the last `window_days`
+    /// to the prior window of the same length. Returns None if there's no
+    /// data in either window OR no clear #1 filler.
+    pub fn filler_progress(&self, window_days: i64) -> Result<Option<FillerProgress>, String> {
+        let conn = self.conn.lock();
+        let now = unix_ms_now();
+        let window_ms = window_days * 86_400_000;
+        let prior_start = now - 2 * window_ms;
+        let prior_end = now - window_ms;
+        let current_start = now - window_ms;
+        let current_end = now;
+
+        // Determine the top filler in the CURRENT window — that's the one
+        // we report progress on.
+        let top: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT word, SUM(count) AS total
+                 FROM filler_events
+                 WHERE removed_at >= ?1 AND removed_at < ?2
+                 GROUP BY word
+                 ORDER BY total DESC, word ASC
+                 LIMIT 1",
+                params![current_start, current_end],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .ok();
+        let Some((word, current_count)) = top else {
+            return Ok(None);
+        };
+
+        let prior_count: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(count), 0)
+                 FROM filler_events
+                 WHERE word = ?1 AND removed_at >= ?2 AND removed_at < ?3",
+                params![word, prior_start, prior_end],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        Ok(Some(FillerProgress {
+            word,
+            current_count,
+            prior_count,
+            window_days,
+        }))
+    }
+
+    /// Append one row per stripped filler word from a single transcription.
+    /// Called alongside `bump_fillers` — the cumulative `filler_counts`
+    /// powers the Insights filler card; this time-indexed log powers the
+    /// month-over-month "Filler progress" card.
+    pub fn bump_filler_events(&self, counts: &[(String, i64)]) -> Result<(), String> {
+        if counts.is_empty() {
+            return Ok(());
+        }
+        let now = unix_ms_now();
+        let mut conn = self.conn.lock();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("filler_events tx begin: {e}"))?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO filler_events (word, removed_at, count)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .map_err(|e| format!("prepare filler_events insert: {e}"))?;
+            for (word, count) in counts {
+                stmt.execute(params![word, now, count])
+                    .map_err(|e| format!("filler_events insert: {e}"))?;
+            }
+        }
+        tx.commit()
+            .map_err(|e| format!("filler_events tx commit: {e}"))?;
+        Ok(())
+    }
+
+    /// True if this milestone key has already been recorded as reached.
+    pub fn is_milestone_reached(&self, key: &str) -> Result<bool, String> {
+        let conn = self.conn.lock();
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM milestones_reached WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("is_milestone_reached query: {e}"))?;
+        Ok(n > 0)
+    }
+
+    /// Record a milestone as reached at the current time. Idempotent —
+    /// repeating with the same key is a no-op (the PK prevents dupes).
+    pub fn record_milestone_reached(&self, key: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT OR IGNORE INTO milestones_reached (key, reached_at) VALUES (?1, ?2)",
+            params![key, unix_ms_now()],
+        )
+        .map_err(|e| format!("record_milestone_reached: {e}"))?;
+        Ok(())
+    }
+
+    /// Like `record_milestone_reached` but always writes the current
+    /// timestamp, overwriting any prior entry. Used for the per-week-
+    /// throttled "personal record" milestones where we want the next
+    /// throttle window to start from the most recent firing, not the
+    /// first one ever.
+    pub fn upsert_milestone_now(&self, key: &str) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO milestones_reached (key, reached_at) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET reached_at = excluded.reached_at",
+            params![key, unix_ms_now()],
+        )
+        .map_err(|e| format!("upsert_milestone_now: {e}"))?;
+        Ok(())
+    }
+
+    /// When a milestone was reached, or None if it hasn't been.
+    pub fn milestone_reached_at(&self, key: &str) -> Result<Option<i64>, String> {
+        let conn = self.conn.lock();
+        let at: Option<i64> = conn
+            .query_row(
+                "SELECT reached_at FROM milestones_reached WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(at)
+    }
+}
+
+fn row_to_transcription(row: &rusqlite::Row) -> rusqlite::Result<Transcription> {
+    Ok(Transcription {
+        id: row.get(0)?,
+        text: row.get(1)?,
+        word_count: row.get(2)?,
+        duration_ms: row.get(3)?,
+        target_app: row.get(4)?,
+        created_at: row.get(5)?,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -658,6 +937,45 @@ pub struct ThemeMatch {
     pub label: String,
     pub transcription_count: i64,
     pub sample_words: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WeekWpm {
+    /// Start of the 7-day window in unix-ms (UTC).
+    pub week_start_ms: i64,
+    /// Average WPM for the window; `None` when the user didn't dictate
+    /// anything in that week.
+    pub avg_wpm: Option<f64>,
+    /// Total words dictated in the window — useful for the frontend
+    /// to dim/skip empty bars without re-deriving.
+    pub words: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PersonalRecords {
+    pub longest_words: Option<Transcription>,
+    pub longest_duration: Option<Transcription>,
+    pub highest_wpm: Option<Transcription>,
+    /// Pre-computed WPM for `highest_wpm` so the frontend doesn't have
+    /// to redo the divide. None if there's no qualifying transcription.
+    pub highest_wpm_value: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppUsage {
+    pub app: String,
+    pub transcription_count: i64,
+    pub total_speech_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FillerProgress {
+    /// The user's #1 filler in the current window — that's the one we
+    /// compare across periods.
+    pub word: String,
+    pub current_count: i64,
+    pub prior_count: i64,
+    pub window_days: i64,
 }
 
 struct Theme {
@@ -829,7 +1147,7 @@ const STOPWORDS: &[&str] = &[
     "kind", "sort",
 ];
 
-fn unix_ms_now() -> i64 {
+pub fn unix_ms_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

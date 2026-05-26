@@ -85,6 +85,17 @@ pub struct Settings {
     /// What the user wants to be called in greetings. Empty falls back to
     /// the OS user's display name.
     pub display_name: String,
+
+    /// When true, fire OS notifications for milestone events (100th
+    /// transcription, week streaks, personal bests). Notifications are
+    /// always rare + meaningful — see `notifications.rs` for the catalog.
+    /// Off → notifications are computed but never shown.
+    #[serde(default = "default_true")]
+    pub milestone_notifications: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -142,6 +153,7 @@ impl Default for Settings {
 
             has_completed_onboarding: false,
             display_name: String::new(),
+            milestone_notifications: true,
         }
     }
 }

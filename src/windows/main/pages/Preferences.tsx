@@ -128,6 +128,17 @@ export default function Preferences() {
         </SecondaryButton>
       </Row>
 
+      <SectionHeader>Notifications</SectionHeader>
+      <Row
+        name="Milestone notifications"
+        hint="Show a desktop notification when you hit a meaningful milestone (100th transcription, week-long streaks, new personal bests). Rare and never during a recording."
+      >
+        <Toggle
+          on={settings.milestone_notifications}
+          onChange={(v) => update({ milestone_notifications: v })}
+        />
+      </Row>
+
       <SectionHeader>Post-processing</SectionHeader>
       <Row name="Auto-capitalize" hint="Sentence starts and standalone i → I">
         <Toggle on={settings.auto_capitalize} onChange={(v) => update({ auto_capitalize: v })} />

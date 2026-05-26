@@ -5,6 +5,7 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
+mod notifications;
 mod perf_log;
 mod settings;
 mod sounds;
@@ -26,7 +27,8 @@ use tauri::{
 use crate::audio::InputDevice;
 use crate::controller::Controller;
 use crate::db::{
-    DayCount, Db, DictionaryEntry, PhraseCount, ThemeMatch, Transcription, UsageTotals, WordCount,
+    AppUsage, DayCount, Db, DictionaryEntry, FillerProgress, PersonalRecords, PhraseCount,
+    ThemeMatch, Transcription, UsageTotals, WeekWpm, WordCount,
 };
 use crate::settings::{Settings, SettingsStore};
 use crate::sounds::SoundPlayer;
@@ -203,6 +205,15 @@ struct UsageSummary {
     top_phrases: Vec<PhraseCount>,
     hourly: [i64; 24],
     themes: Vec<ThemeMatch>,
+    /// v0.1.43: 12-week weekly WPM trend (oldest → newest).
+    weekly_wpm: Vec<WeekWpm>,
+    /// v0.1.43: All-time longest dictation / longest duration / highest WPM.
+    personal_records: PersonalRecords,
+    /// v0.1.43: Top 5 apps by transcription count.
+    app_breakdown: Vec<AppUsage>,
+    /// v0.1.43: Month-over-month filler progress for the user's #1 filler.
+    /// Null when there's not enough data yet to make a comparison.
+    filler_progress: Option<FillerProgress>,
 }
 
 // ----- Dictionary -----
@@ -510,6 +521,16 @@ fn usage_summary(state: State<'_, AppState>) -> Result<UsageSummary, String> {
         top_phrases: state.db.top_phrases(8)?,
         hourly: state.db.hourly_distribution()?,
         themes: state.db.topic_breakdown()?,
+        // 12 weeks of WPM history gives a roughly-quarterly trend
+        // without dominating the card visually.
+        weekly_wpm: state.db.weekly_wpm_trend(12)?,
+        personal_records: state.db.personal_records()?,
+        // 5 apps is enough to see a meaningful breakdown without the
+        // card feeling like a forensics dashboard.
+        app_breakdown: state.db.app_breakdown(5)?,
+        // 30-day comparison window — long enough to smooth daily
+        // noise, short enough to feel responsive to behavior change.
+        filler_progress: state.db.filler_progress(30)?,
     })
 }
 

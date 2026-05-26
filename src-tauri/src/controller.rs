@@ -448,8 +448,30 @@ impl Controller {
                                     if let Err(e) = db.bump_fillers(&entries) {
                                         eprintln!("[db] failed to bump fillers: {e}");
                                     }
+                                    // Also append to the time-indexed
+                                    // `filler_events` log so the Insights
+                                    // page can ask "how many 'um's last
+                                    // month vs the month before" — the
+                                    // cumulative counts in `bump_fillers`
+                                    // can't answer windowed questions.
+                                    if let Err(e) = db.bump_filler_events(&entries) {
+                                        eprintln!("[db] failed to bump filler_events: {e}");
+                                    }
                                 }
                                 let _ = app.emit("murmr:transcription-saved", &());
+
+                                // Background-fire any milestone notifications
+                                // earned by this transcription. Spawns its
+                                // own thread + handles the 4-second delay,
+                                // fullscreen-detection, and the
+                                // milestones_reached de-dup itself.
+                                crate::notifications::check_and_fire(
+                                    app.clone(),
+                                    Arc::clone(&db),
+                                    Arc::clone(&settings_store),
+                                    word_count,
+                                    duration_ms,
+                                );
                             }
                             Err(e) => eprintln!("[db] failed to write transcription: {e}"),
                         }

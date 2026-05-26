@@ -71,6 +71,32 @@ export function transcriptionCount(): Promise<number> {
   return invoke<number>('transcription_count');
 }
 
+export interface WeekWpm {
+  week_start_ms: number;
+  avg_wpm: number | null;
+  words: number;
+}
+
+export interface PersonalRecords {
+  longest_words: Transcription | null;
+  longest_duration: Transcription | null;
+  highest_wpm: Transcription | null;
+  highest_wpm_value: number | null;
+}
+
+export interface AppUsage {
+  app: string;
+  transcription_count: number;
+  total_speech_ms: number;
+}
+
+export interface FillerProgress {
+  word: string;
+  current_count: number;
+  prior_count: number;
+  window_days: number;
+}
+
 export interface UsageSummary {
   totals: {
     total_transcriptions: number;
@@ -91,6 +117,11 @@ export interface UsageSummary {
     transcription_count: number;
     sample_words: string[];
   }>;
+  // v0.1.43 Insights expansion
+  weekly_wpm: WeekWpm[];
+  personal_records: PersonalRecords;
+  app_breakdown: AppUsage[];
+  filler_progress: FillerProgress | null;
 }
 
 export function usageSummary(): Promise<UsageSummary> {
@@ -202,6 +233,9 @@ export interface Settings {
   force_cpu: boolean;
   has_completed_onboarding: boolean;
   display_name: string;
+  /** Show OS notifications for milestone events (100th transcription,
+   * week streaks, personal bests). Default true. */
+  milestone_notifications: boolean;
 }
 
 export function getSettings(): Promise<Settings> {

@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   listenTranscriptionSaved,
   usageSummary,
+  type AppUsage,
+  type FillerProgress,
+  type PersonalRecords,
   type UsageSummary,
+  type WeekWpm,
 } from '../../../lib/ipc';
 
 const TYPING_WPM_BASELINE = 40;
@@ -105,6 +109,22 @@ export default function Insights() {
         fillers={summary.top_fillers}
         totalRemoved={summary.total_fillers_removed}
       />
+
+      {/* ---------- Trends (v0.1.43) ---------- */}
+      <h2 className="font-serif text-[22px] tracking-[-0.3px] text-text-primary mt-10 mb-3">
+        Trends
+      </h2>
+      <p className="text-[12px] text-text-quaternary mb-4 leading-[1.55] max-w-[560px]">
+        How your dictation is changing over time, and the personal bests
+        you've set so far.
+      </p>
+
+      <WeeklyWpmCard weekly={summary.weekly_wpm} />
+      <PersonalRecordsBlock records={summary.personal_records} />
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        <FillerProgressCard progress={summary.filler_progress} />
+        <AppBreakdownCard apps={summary.app_breakdown} />
+      </div>
 
       {/* ---------- Speaking habits (milestone-gated) ---------- */}
       <h2 className="font-serif text-[22px] tracking-[-0.3px] text-text-primary mt-10 mb-3">
@@ -749,6 +769,320 @@ function formatDayInt(yyyymmdd: number): string {
   const m = Math.floor((yyyymmdd / 100) % 100);
   const d = yyyymmdd % 100;
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// ---------- v0.1.43 Insights cards ----------
+
+function WeeklyWpmCard({ weekly }: { weekly: WeekWpm[] }) {
+  // Drop trailing empty weeks (user hasn't dictated this week yet) but
+  // keep the gap if it's surrounded by data — gives an honest picture.
+  const trimmed = useMemo(() => {
+    let end = weekly.length;
+    while (end > 0 && weekly[end - 1].words === 0) end--;
+    return weekly.slice(0, end);
+  }, [weekly]);
+  const hasData = trimmed.some((w) => w.avg_wpm !== null && w.words > 0);
+  const latest = trimmed[trimmed.length - 1];
+  const prior = trimmed[trimmed.length - 2];
+  const delta =
+    latest?.avg_wpm != null && prior?.avg_wpm != null && prior.avg_wpm > 0
+      ? ((latest.avg_wpm - prior.avg_wpm) / prior.avg_wpm) * 100
+      : null;
+
+  return (
+    <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px] mb-3">
+      <div className="flex items-baseline justify-between gap-3 mb-1">
+        <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0">
+          Speaking pace
+        </h3>
+        {delta !== null && (
+          <span
+            className={
+              'text-[12px] font-medium ' +
+              (delta > 1
+                ? 'text-text-primary'
+                : delta < -1
+                ? 'text-text-tertiary'
+                : 'text-text-quaternary')
+            }
+          >
+            {delta > 0 ? '+' : ''}
+            {delta.toFixed(0)}% vs prior week
+          </span>
+        )}
+      </div>
+      <p className="text-[12px] text-text-quaternary mb-3 leading-[1.55]">
+        {hasData
+          ? 'Your weekly average words per minute over the last 12 weeks.'
+          : 'Your weekly average words per minute will appear here once you dictate for a few weeks.'}
+      </p>
+      <Sparkline points={trimmed.map((w) => w.avg_wpm)} />
+    </div>
+  );
+}
+
+function Sparkline({ points }: { points: Array<number | null> }) {
+  const width = 760;
+  const height = 60;
+  const padding = 4;
+  const ys = points.map((p) => p ?? 0);
+  const max = Math.max(...ys, 1);
+  const min = Math.min(...ys.filter((y) => y > 0), max);
+  const range = Math.max(1, max - min);
+  const stepX =
+    points.length > 1 ? (width - 2 * padding) / (points.length - 1) : 0;
+  const path = points
+    .map((p, i) => {
+      if (p === null) return null;
+      const x = padding + i * stepX;
+      const y = height - padding - ((p - min) / range) * (height - 2 * padding);
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[60px] block">
+      <path
+        d={path}
+        fill="none"
+        stroke="var(--text-primary)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {points.map((p, i) => {
+        if (p === null) return null;
+        const x = padding + i * stepX;
+        const y =
+          height - padding - ((p - min) / range) * (height - 2 * padding);
+        return (
+          <circle
+            key={i}
+            cx={x}
+            cy={y}
+            r={i === points.length - 1 ? 3 : 1.6}
+            fill="var(--text-primary)"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function PersonalRecordsBlock({ records }: { records: PersonalRecords }) {
+  const hasAny =
+    records.longest_words || records.longest_duration || records.highest_wpm;
+  return (
+    <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px] mb-3">
+      <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0 mb-1">
+        Personal records
+      </h3>
+      <p className="text-[12px] text-text-quaternary mb-4 leading-[1.55]">
+        {hasAny
+          ? 'Your all-time bests since installing Murmr.'
+          : "Your records will land here once you've dictated a few times."}
+      </p>
+      <div className="grid grid-cols-3 gap-3">
+        <RecordTile
+          label="Longest dictation"
+          value={
+            records.longest_words
+              ? records.longest_words.word_count.toLocaleString()
+              : '—'
+          }
+          unit={records.longest_words ? 'words' : ''}
+          when={records.longest_words ? formatRecordDate(records.longest_words.created_at) : ''}
+        />
+        <RecordTile
+          label="Longest duration"
+          value={
+            records.longest_duration
+              ? formatRecordDuration(records.longest_duration.duration_ms)
+              : '—'
+          }
+          unit=""
+          when={
+            records.longest_duration
+              ? formatRecordDate(records.longest_duration.created_at)
+              : ''
+          }
+        />
+        <RecordTile
+          label="Highest WPM"
+          value={
+            records.highest_wpm_value != null
+              ? Math.round(records.highest_wpm_value).toString()
+              : '—'
+          }
+          unit={records.highest_wpm_value != null ? 'wpm' : ''}
+          when={records.highest_wpm ? formatRecordDate(records.highest_wpm.created_at) : ''}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RecordTile({
+  label,
+  value,
+  unit,
+  when,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  when: string;
+}) {
+  return (
+    <div className="rounded-[10px] bg-bg-chrome border border-border-hairline px-4 py-3">
+      <div className="text-[10px] uppercase tracking-[0.6px] text-text-quaternary font-medium">
+        {label}
+      </div>
+      <div className="flex items-baseline gap-1.5 mt-1.5">
+        <span className="font-serif text-[26px] tracking-[-0.5px] leading-none text-text-primary">
+          {value}
+        </span>
+        {unit && (
+          <span className="text-[11px] text-text-tertiary">{unit}</span>
+        )}
+      </div>
+      <div className="text-[11px] text-text-quaternary mt-1.5 min-h-[14px]">
+        {when}
+      </div>
+    </div>
+  );
+}
+
+function FillerProgressCard({
+  progress,
+}: {
+  progress: FillerProgress | null;
+}) {
+  if (!progress) {
+    return (
+      <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px]">
+        <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0 mb-1">
+          Filler progress
+        </h3>
+        <p className="text-[12px] text-text-quaternary mt-3 leading-[1.55]">
+          Tracking — your month-over-month change will appear once
+          you've dictated for at least a few weeks.
+        </p>
+      </div>
+    );
+  }
+  const delta =
+    progress.prior_count > 0
+      ? ((progress.current_count - progress.prior_count) / progress.prior_count) * 100
+      : null;
+  const isImproved = delta !== null && delta < 0;
+  const isWorse = delta !== null && delta > 5;
+  return (
+    <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px]">
+      <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0 mb-1">
+        Filler progress
+      </h3>
+      <p className="text-[12px] text-text-quaternary mb-4 leading-[1.55]">
+        Your most-used filler over the last {progress.window_days} days,
+        compared to the {progress.window_days} before that.
+      </p>
+      <div className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium mb-1">
+        "{progress.word}"
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="font-serif text-[30px] tracking-[-0.5px] leading-none text-text-primary">
+          {delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(0)}%`}
+        </span>
+        <span className="text-[12px] text-text-tertiary">
+          {delta === null
+            ? 'no prior data'
+            : isImproved
+            ? 'less this month'
+            : isWorse
+            ? 'more this month'
+            : 'about the same'}
+        </span>
+      </div>
+      <div className="text-[11px] text-text-quaternary mt-3 leading-[1.55]">
+        {progress.prior_count > 0
+          ? `${progress.current_count.toLocaleString()} this period · ${progress.prior_count.toLocaleString()} prior`
+          : `${progress.current_count.toLocaleString()} caught this period`}
+      </div>
+    </div>
+  );
+}
+
+function AppBreakdownCard({ apps }: { apps: AppUsage[] }) {
+  if (apps.length === 0) {
+    return (
+      <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px]">
+        <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0 mb-1">
+          Where you dictate
+        </h3>
+        <p className="text-[12px] text-text-quaternary mt-3 leading-[1.55]">
+          Once you've used Murmr in a few apps, the breakdown shows
+          up here.
+        </p>
+      </div>
+    );
+  }
+  const total = apps.reduce((sum, a) => sum + a.transcription_count, 0);
+  return (
+    <div className="rounded-[12px] bg-bg-row border border-border-hairline p-[22px]">
+      <h3 className="font-serif text-[18px] tracking-[-0.3px] text-text-primary m-0 mb-1">
+        Where you dictate
+      </h3>
+      <p className="text-[12px] text-text-quaternary mb-4 leading-[1.55]">
+        The apps you use Murmr in most.
+      </p>
+      <div className="space-y-2.5">
+        {apps.map((a) => {
+          const pct = total > 0 ? (a.transcription_count / total) * 100 : 0;
+          return (
+            <div key={a.app}>
+              <div className="flex items-baseline justify-between text-[12px] mb-1">
+                <span className="text-text-secondary truncate pr-2">{formatAppName(a.app)}</span>
+                <span className="text-text-quaternary tabular-nums">
+                  {a.transcription_count}
+                </span>
+              </div>
+              <div className="h-[4px] rounded-full bg-bg-chrome overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-text-tertiary"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatRecordDate(unix_ms: number): string {
+  const d = new Date(unix_ms);
+  const now = new Date();
+  const ms_ago = now.getTime() - d.getTime();
+  const days = Math.floor(ms_ago / 86_400_000);
+  if (days < 1) return 'today';
+  if (days < 2) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatRecordDuration(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatAppName(app: string): string {
+  if (app === '(unknown)') return 'Unknown app';
+  // Drop common executable suffixes for cleaner display.
+  return app.replace(/\.(exe|app)$/i, '');
 }
 
 function formatHm(ms: number): string {
