@@ -16,6 +16,28 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.44 — Audio duck no longer strands per-app volumes
+
+### Fixed
+
+- **Per-app volumes now return fully to where they were** when a
+  dictation ends. Apps with multiple audio sessions per process
+  (Chrome's per-tab streams, Discord's per-channel streams, OBS, Slack
+  notifications + main, etc.) were getting their volumes saved by
+  process ID, which meant the second session's value overwrote the
+  first's in our internal map — so on restore all of that app's
+  sessions snapped to whichever single value won the race. Volumes are
+  now saved + restored per audio session identifier, so each session's
+  true original volume is preserved.
+
+### Improved
+
+- `perf.log` after each unduck now reports
+  `restored X/Y session(s) (Z missing — process/session ended)` so
+  any further volume-stranding can be diagnosed from the log alone.
+
+---
+
 ## v0.1.43 — Insights expansion + milestone notifications
 
 ### New
