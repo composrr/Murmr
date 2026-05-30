@@ -16,6 +16,23 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.47 — Stop crashing on dictation
+
+### Fixed
+
+- **Murmr no longer crashes mid-dictation.** v0.1.46 had a hard
+  native-code crash (STATUS_ILLEGAL_INSTRUCTION) on every dictation
+  attempt for some users. Root cause was unsafe PWSTR / COM handling
+  in the per-session audio-duck code added in v0.1.44. Reverted that
+  change — audio ducking goes back to per-process keying (slightly
+  imperfect restore for apps with multiple audio sessions per PID like
+  Chrome / Discord, but stable). Also wrapped the entire audio-duck
+  flow in `catch_unwind` so any future bug in that area can never
+  crash the whole app again — a failed-to-duck is now logged and
+  Murmr proceeds rather than aborting.
+
+---
+
 ## v0.1.46 — Fast "Check for updates"
 
 ### Fixed
