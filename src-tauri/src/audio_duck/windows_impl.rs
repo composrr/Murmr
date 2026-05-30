@@ -12,29 +12,34 @@
 //!   all do the same thing. Works regardless of routing topology.
 //!
 //! State management:
-//!   On `duck()` we save `(session_instance_id → original_volume)` for
-//!   every session we touched. `unduck()` re-enumerates and restores by
-//!   session_instance_id. Keying by session ID (not process ID) is
-//!   critical — apps like Chrome, Discord, Slack, OBS routinely have
-//!   MULTIPLE audio sessions per process (one per browser tab, one per
-//!   voice channel, plus notification sounds). Keying by PID meant the
-//!   last session enumerated overwrote all the others' saved values, so
-//!   `unduck()` restored every session of those apps to whichever single
-//!   value happened to win the race — leaving some sessions stuck below
-//!   their original volume. Fixed in v0.1.44.
+//!   On `duck()` we save `(process_id → original_volume)` for every session
+//!   we touched. `unduck()` re-enumerates and restores by process_id, so a
+//!   process that opened a NEW audio stream after `duck()` doesn't get
+//!   restored to "1.0" — it keeps whatever it currently has.
 //!
-//!   Sessions whose process / session exited between duck/unduck just
-//!   disappear from the enumeration and are silently dropped (no harm —
-//!   the session is gone, there's nothing to restore).
+//!   KNOWN LIMITATION: apps with multiple audio sessions per PID (Chrome
+//!   tabs, Discord channels, OBS scenes) all get restored to the value of
+//!   whichever single session was enumerated last during duck — so the
+//!   restore is "good enough" but not perfectly per-session. v0.1.44 tried
+//!   to key by session_instance_id (PWSTR from GetSessionInstanceIdentifier)
+//!   to fix this, but the PWSTR handling crashed mid-dictation on user
+//!   machines (STATUS_ILLEGAL_INSTRUCTION). Until we have a safer per-
+//!   session approach, the PID-keyed restore is what we ship.
 //!
-//!   Sessions that came into existence AFTER `duck()` (e.g. you opened
-//!   YouTube mid-dictation) are not in our saved map → we leave them at
-//!   whatever volume they currently have. Correct: they were never ducked.
+//!   Sessions whose process exited between duck/unduck just disappear from
+//!   the enumeration and are silently dropped.
+//!
+//! Crash isolation:
+//!   Both `duck()` and `unduck()` are wrapped in `std::panic::catch_unwind`
+//!   so any panic inside COM enumeration / interface casting / volume
+//!   manipulation cannot take down the whole Murmr process. Failed-to-duck
+//!   is a much less bad outcome than crashed-the-app.
 
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 
 use parking_lot::Mutex;
-use windows::core::{Interface, PWSTR};
+use windows::core::Interface;
 use windows::Win32::Media::Audio::{
     eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
     ISimpleAudioVolume, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -46,9 +51,9 @@ use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
 use crate::perf_log;
 
-/// session_instance_id (unique per audio session, stable for its lifetime) →
-/// original volume (0.0–1.0) at the time we ducked. Cleared each `unduck()`.
-static SAVED_VOLUMES: Mutex<Option<HashMap<String, f32>>> = Mutex::new(None);
+/// process_id → original volume (0.0–1.0) at the time we ducked. Cleared
+/// each `unduck()`.
+static SAVED_VOLUMES: Mutex<Option<HashMap<u32, f32>>> = Mutex::new(None);
 
 /// Per-thread COM init. Re-entry on the same thread is harmless (returns
 /// S_FALSE for matching apartment, RPC_E_CHANGED_MODE for a flip).
@@ -70,30 +75,11 @@ fn current_process_id() -> u32 {
     unsafe { GetCurrentProcessId() }
 }
 
-/// Read a `PWSTR` returned by a COM call into an owned `String`. Returns
-/// an empty string if the pointer is null. Used for session instance IDs.
-unsafe fn pwstr_to_string(ptr: PWSTR) -> String {
-    if ptr.is_null() {
-        return String::new();
-    }
-    let mut len = 0;
-    while *ptr.0.add(len) != 0 {
-        len += 1;
-    }
-    let slice = std::slice::from_raw_parts(ptr.0, len);
-    String::from_utf16_lossy(slice)
-}
-
 /// Walk every active render device, every active session on each device.
-/// `f` is called with (session_instance_id, simple_audio_volume) for each
-/// non-Murmr session. The instance ID is what we key saved volumes by —
-/// it's unique per session (NOT per process), so apps with multiple
-/// sessions per PID (Chrome tabs, Discord channels, OBS scenes, etc.) get
-/// their volumes saved + restored individually.
-///
-/// Short-circuits on COM errors at the device level so one bad device
-/// doesn't kill the whole walk.
-fn for_each_session<F: FnMut(&str, &ISimpleAudioVolume)>(mut f: F) {
+/// `f` is called with (process_id, simple_audio_volume) for each non-Murmr
+/// session — short-circuits on COM errors at the device level so one bad
+/// device doesn't kill the whole walk.
+fn for_each_session<F: FnMut(u32, &ISimpleAudioVolume)>(mut f: F) {
     let our_pid = current_process_id();
 
     unsafe {
@@ -150,8 +136,7 @@ fn for_each_session<F: FnMut(&str, &ISimpleAudioVolume)>(mut f: F) {
                     Err(_) => continue,
                 };
 
-                // Get extended interface so we can read process_id +
-                // session instance identifier.
+                // Get extended interface so we can read process_id.
                 let control2: IAudioSessionControl2 = match control.cast() {
                     Ok(c) => c,
                     Err(_) => continue,
@@ -163,31 +148,41 @@ fn for_each_session<F: FnMut(&str, &ISimpleAudioVolume)>(mut f: F) {
                     continue;
                 }
 
-                // The session instance ID is unique per session for its
-                // entire lifetime. If a session is destroyed + recreated
-                // it gets a NEW id, which is what we want — the new
-                // session was never ducked.
-                let session_id_ptr = match control2.GetSessionInstanceIdentifier() {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
-                let session_id = pwstr_to_string(session_id_ptr);
-                if session_id.is_empty() {
-                    continue;
-                }
-
                 let vol: ISimpleAudioVolume = match control.cast() {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
 
-                f(&session_id, &vol);
+                f(pid, &vol);
             }
         }
     }
 }
 
 pub fn duck(amount: f32) {
+    // Wrap the entire duck pass in catch_unwind so any panic in COM
+    // enumeration / interface casting / volume calls cannot abort the
+    // process. With panic = "abort" in Cargo.toml, an uncaught panic in
+    // unsafe code is fatal — and audio ducking is non-essential, so
+    // failing silently is the right tradeoff. Per-thread Once guards
+    // CoInitializeEx so re-entry from the catch_unwind closure is safe.
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        duck_inner(amount);
+    }));
+    if let Err(e) = result {
+        let msg = e
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<no message>");
+        perf_log::append(&format!("[duck] panic during duck(): {msg}"));
+        // Clear saved state so unduck() doesn't try to restore based on
+        // possibly-partial data.
+        *SAVED_VOLUMES.lock() = None;
+    }
+}
+
+fn duck_inner(amount: f32) {
     {
         let guard = SAVED_VOLUMES.lock();
         if guard.is_some() {
@@ -196,23 +191,27 @@ pub fn duck(amount: f32) {
         }
     }
 
-    let mut saved: HashMap<String, f32> = HashMap::new();
+    let mut saved: HashMap<u32, f32> = HashMap::new();
     let factor = (1.0 - amount).clamp(0.0, 1.0);
     let mut count = 0;
 
-    for_each_session(|session_id, vol| {
+    for_each_session(|pid, vol| {
         unsafe {
             let current = vol.GetMasterVolume().unwrap_or(1.0);
-            // Insert keyed by session id — never overwrites a previously-
-            // saved session, since each session has a unique id.
-            saved.insert(session_id.to_string(), current);
+            // Insert keyed by PID. For apps with multiple audio sessions
+            // per PID (Chrome tabs, Discord channels, OBS) this means the
+            // last session's volume wins the saved slot, and on unduck
+            // all sessions of that PID restore to that single value.
+            // Imperfect but stable — see the module doc comment for the
+            // history with per-session keying.
+            saved.insert(pid, current);
             let target = (current * factor).clamp(0.0, 1.0);
             // GUID context arg = caller's identifier so the OS can route
             // change-notifications back to us. Passing zero/null is fine
             // when we don't care.
             if let Err(e) = vol.SetMasterVolume(target, std::ptr::null()) {
                 perf_log::append(&format!(
-                    "[duck] session={session_id} SetMasterVolume failed: {e:?}"
+                    "[duck] pid={pid} SetMasterVolume failed: {e:?}"
                 ));
             } else {
                 count += 1;
@@ -228,6 +227,21 @@ pub fn duck(amount: f32) {
 }
 
 pub fn unduck() {
+    let result = std::panic::catch_unwind(AssertUnwindSafe(unduck_inner));
+    if let Err(e) = result {
+        let msg = e
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<no message>");
+        perf_log::append(&format!("[duck] panic during unduck(): {msg}"));
+        // Clear so a future duck() isn't blocked by the "already ducked"
+        // check pointing at stale data.
+        *SAVED_VOLUMES.lock() = None;
+    }
+}
+
+fn unduck_inner() {
     let saved = match SAVED_VOLUMES.lock().take() {
         Some(s) => s,
         None => {
@@ -237,14 +251,11 @@ pub fn unduck() {
     };
 
     let mut restored = 0;
-    let mut missing = 0;
-    for_each_session(|session_id, vol| {
-        if let Some(original) = saved.get(session_id) {
+    for_each_session(|pid, vol| {
+        if let Some(original) = saved.get(&pid) {
             unsafe {
                 if let Err(e) = vol.SetMasterVolume(*original, std::ptr::null()) {
-                    perf_log::append(&format!(
-                        "[duck] session={session_id} restore failed: {e:?}"
-                    ));
+                    perf_log::append(&format!("[duck] pid={pid} restore failed: {e:?}"));
                 } else {
                     restored += 1;
                 }
@@ -252,13 +263,7 @@ pub fn unduck() {
         }
     });
 
-    // Any session in `saved` that didn't show up in the unduck walk —
-    // its process or session was closed between duck and unduck. Nothing
-    // to restore, but log the count so a perf.log paste can show us if
-    // it's happening at unexpected rates.
-    if restored < saved.len() {
-        missing = saved.len() - restored;
-    }
+    let missing = saved.len().saturating_sub(restored);
     perf_log::append(&format!(
         "[duck] restored {restored}/{} session(s) ({} missing — process/session ended)",
         saved.len(),
