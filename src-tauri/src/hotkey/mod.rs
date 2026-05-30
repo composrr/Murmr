@@ -315,7 +315,10 @@ pub fn set_recording_active(active: bool) {
     RECORDING_ACTIVE.store(active, Ordering::Relaxed);
 }
 
-fn is_recording_active() -> bool {
+/// Public mirror so the HUD can ask "am I supposed to be showing right
+/// now?" on mount and self-heal if it missed the original Status emit
+/// (cold-mount race, WebView2 wake-from-suspend, etc).
+pub fn is_recording_active() -> bool {
     RECORDING_ACTIVE.load(Ordering::Relaxed)
 }
 

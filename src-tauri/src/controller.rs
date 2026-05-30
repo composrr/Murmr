@@ -159,6 +159,13 @@ impl Controller {
                     self.emit(Status::Recording);
                     self.show_hud();
                     self.sounds.play_start_click();
+                    // Re-emit Status::Recording on a short delay tail —
+                    // catches the cases where the HUD's React listener
+                    // wasn't ready for the first emit (app just opened,
+                    // WebView just woke from idle, etc). The HUD's
+                    // recording-state reducer is idempotent — duplicate
+                    // events are no-ops, so it's safe to fire several.
+                    self.reemit_recording_after_show();
                 }
 
                 (HotkeyEvent::DictationDown { .. }, RecState::Toggled) => {
@@ -610,6 +617,32 @@ impl Controller {
         if let Some(hud) = self.app.get_webview_window("hud") {
             let _ = hud.hide();
         }
+    }
+
+    /// Re-fires Status::Recording after a short delay, then again later.
+    /// Mitigates the "I heard the sound but never saw the HUD" race
+    /// where the HUD's React listener hadn't mounted yet (first
+    /// dictation after launch) or had been suspended (long idle, then
+    /// woke from WebView2's process freezer). Spawned on a worker
+    /// thread so it doesn't block the controller's hot path.
+    ///
+    /// The HUD reducer is idempotent — receiving Status::Recording
+    /// multiple times while already in `recording` view is a no-op.
+    fn reemit_recording_after_show(&self) {
+        let app = self.app.clone();
+        std::thread::Builder::new()
+            .name("murmr-hud-resync".into())
+            .spawn(move || {
+                // Two delays cover the realistic window: ~120ms is
+                // enough for a cold-mounted React app to finish
+                // attaching listeners, 500ms covers slow disks / a
+                // WebView coming out of deep suspend.
+                for delay_ms in [120u64, 500u64] {
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    let _ = app.emit("murmr:status", Status::Recording);
+                }
+            })
+            .ok();
     }
 }
 

@@ -363,6 +363,16 @@ fn launch_at_login_active(app: AppHandle) -> Result<bool, String> {
         .map_err(|e| format!("query autostart: {e}"))
 }
 
+/// Returns true while the controller has an active recording (hold-uncertain
+/// or toggled state). Called by the HUD on mount so it can self-heal if it
+/// missed the original Status::Recording event (cold-mount race, WebView
+/// wake-from-suspend, etc) — without this it would render nothing until the
+/// next state change, leaving the user with a sound + window but no pill.
+#[tauri::command]
+fn is_recording_active() -> bool {
+    hotkey::is_recording_active()
+}
+
 /// Open a specific pane of System Settings → Privacy & Security on macOS.
 /// `pane` should be one of: "microphone", "accessibility", "input-monitoring".
 /// On non-macOS platforms this is a no-op (frontend only calls it when
@@ -970,6 +980,7 @@ pub fn run() {
             set_launch_at_login,
             launch_at_login_active,
             open_macos_pref_pane,
+            is_recording_active,
             purge_older_transcriptions,
             clear_last_24_hours,
             clear_all_transcriptions,

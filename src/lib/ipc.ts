@@ -306,6 +306,12 @@ export function launchAtLoginActive(): Promise<boolean> {
   return invoke<boolean>('launch_at_login_active');
 }
 
+/** Whether the controller currently has an active recording. Used by the
+ * HUD on mount so it can self-heal if it missed the live emit. */
+export function isRecordingActive(): Promise<boolean> {
+  return invoke<boolean>('is_recording_active');
+}
+
 // ----- macOS Privacy & Security deep links -----
 
 export type MacPrefPane = 'microphone' | 'accessibility' | 'input-monitoring';

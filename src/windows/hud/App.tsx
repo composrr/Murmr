@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { listenStatus, type DictationStatus } from '../../lib/ipc';
+import {
+  isRecordingActive,
+  listenStatus,
+  type DictationStatus,
+} from '../../lib/ipc';
 import Recording from './Recording';
 import Thinking from './Thinking';
 import ResultPopup from './ResultPopup';
@@ -59,6 +63,22 @@ export default function HudApp() {
       setRmsHistory(Array(WAVEFORM_BARS).fill(0));
       setActiveSpeechMs(0);
     };
+
+    // Self-heal on mount. If Rust already started a recording before this
+    // component finished mounting (cold launch + immediate hotkey, or a
+    // WebView wake-from-suspend that missed the live event), promote the
+    // view to 'recording' immediately so the pill appears instead of an
+    // empty transparent window. Date.now() is the best we can do for
+    // startedAt — we don't know the actual press time, but the gap is
+    // small (sub-second in the cold-mount case).
+    isRecordingActive()
+      .then((active) => {
+        if (cancelled || !active) return;
+        if (lastSeenStateRef.current !== 'recording') resetCounters();
+        setView({ kind: 'recording', startedAt: Date.now() });
+        lastSeenStateRef.current = 'recording';
+      })
+      .catch((e) => console.error('isRecordingActive failed', e));
 
     listenStatus((status) => {
       if (cancelled) return;
