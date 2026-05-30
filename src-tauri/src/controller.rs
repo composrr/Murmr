@@ -382,13 +382,20 @@ impl Controller {
                     }
                 };
 
+                perf_log::append("[ctrl] post-stop: starting resample + transcribe");
                 let result = (|| -> Result<String, String> {
                     let samples_16k =
                         audio::to_whisper_format(&cap.samples, cap.sample_rate, cap.channels)?;
+                    perf_log::append("[ctrl] resample done, invoking whisper");
                     transcriber.transcribe(&samples_16k, initial_prompt.as_deref())
                 })();
+                perf_log::append(&format!(
+                    "[ctrl] whisper returned: ok={}",
+                    result.is_ok()
+                ));
 
                 let result = result.map(|raw| transcribe::process(&raw, &settings, &dictionary));
+                perf_log::append("[ctrl] postprocess done");
 
                 // Extract text + stripped fillers so the rest of the match
                 // arms only deal with `String` like before.
@@ -427,7 +434,9 @@ impl Controller {
                             return;
                         }
 
+                        perf_log::append("[ctrl] starting inject_text");
                         if let Err(e) = injector::inject_text(&text) {
+                            perf_log::append(&format!("[ctrl] inject_text failed: {e}"));
                             sounds.play_error_beep();
                             let _ = app.emit(
                                 "murmr:status",
@@ -438,10 +447,13 @@ impl Controller {
                             hide_hud();
                             return;
                         }
+                        perf_log::append("[ctrl] inject_text ok");
 
                         let word_count = text.split_whitespace().count() as i64;
+                        perf_log::append("[ctrl] before insert_transcription");
                         match db.insert_transcription(&text, word_count, duration_ms, None) {
                             Ok(_) => {
+                                perf_log::append("[ctrl] insert_transcription ok");
                                 let now_ms = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
@@ -449,6 +461,7 @@ impl Controller {
                                 if let Err(e) = db.bump_streak_day(now_ms) {
                                     eprintln!("[db] failed to bump streak day: {e}");
                                 }
+                                perf_log::append("[ctrl] bump_streak_day ok");
                                 if !stripped_fillers.is_empty() {
                                     let entries: Vec<(String, i64)> =
                                         stripped_fillers.iter().map(|(k, v)| (k.clone(), *v)).collect();
@@ -465,22 +478,53 @@ impl Controller {
                                         eprintln!("[db] failed to bump filler_events: {e}");
                                     }
                                 }
+                                perf_log::append("[ctrl] fillers persisted");
                                 let _ = app.emit("murmr:transcription-saved", &());
+                                perf_log::append("[ctrl] transcription-saved event emitted");
 
                                 // Background-fire any milestone notifications
                                 // earned by this transcription. Spawns its
                                 // own thread + handles the 4-second delay,
                                 // fullscreen-detection, and the
-                                // milestones_reached de-dup itself.
-                                crate::notifications::check_and_fire(
-                                    app.clone(),
-                                    Arc::clone(&db),
-                                    Arc::clone(&settings_store),
-                                    word_count,
-                                    duration_ms,
+                                // milestones_reached de-dup itself. Wrapped
+                                // in catch_unwind defensively so a panic
+                                // inside the notification flow (Tauri
+                                // notification plugin, Win32 fullscreen
+                                // detection, etc) can't take down Murmr —
+                                // it just gets logged.
+                                let app_for_notify = app.clone();
+                                let db_for_notify = Arc::clone(&db);
+                                let settings_for_notify = Arc::clone(&settings_store);
+                                let notify_result = std::panic::catch_unwind(
+                                    std::panic::AssertUnwindSafe(|| {
+                                        crate::notifications::check_and_fire(
+                                            app_for_notify,
+                                            db_for_notify,
+                                            settings_for_notify,
+                                            word_count,
+                                            duration_ms,
+                                        );
+                                    }),
                                 );
+                                if let Err(e) = notify_result {
+                                    let msg = e
+                                        .downcast_ref::<&str>()
+                                        .copied()
+                                        .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                                        .unwrap_or("<no message>");
+                                    perf_log::append(&format!(
+                                        "[ctrl] notifications::check_and_fire panicked: {msg}"
+                                    ));
+                                } else {
+                                    perf_log::append("[ctrl] notifications scheduled");
+                                }
                             }
-                            Err(e) => eprintln!("[db] failed to write transcription: {e}"),
+                            Err(e) => {
+                                perf_log::append(&format!(
+                                    "[ctrl] insert_transcription failed: {e}"
+                                ));
+                                eprintln!("[db] failed to write transcription: {e}");
+                            }
                         }
 
                         *last_injected.lock() = Some(text.clone());

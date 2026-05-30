@@ -51,90 +51,123 @@ pub fn check_and_fire(
     std::thread::Builder::new()
         .name("murmr-notify".into())
         .spawn(move || {
-            // Master toggle — bail before doing any work if the user
-            // turned notifications off.
-            if !settings.get().milestone_notifications {
-                return;
-            }
-
-            // Pull totals fresh so we see the row we just inserted.
-            let totals = match db.usage_totals() {
-                Ok(t) => t,
-                Err(e) => {
-                    perf_log::append(&format!("[notify] usage_totals failed: {e}"));
-                    return;
-                }
-            };
-
-            let mut candidates: Vec<Milestone> = Vec::new();
-            candidates.extend(transcription_count_milestone(&totals));
-            candidates.extend(words_total_milestone(&totals));
-            candidates.extend(streak_milestone(&totals));
-            candidates.extend(personal_record_milestones(
-                &db,
-                last_word_count,
-                last_duration_ms,
-            ));
-
-            // Filter out anything we've already fired (lifetime keys)
-            // OR fired too recently (record-throttle keys).
-            let now = crate::db::unix_ms_now();
-            candidates.retain(|m| {
-                if m.is_throttled {
-                    match db.milestone_reached_at(&m.key) {
-                        Ok(Some(at)) => now - at > RECORD_THROTTLE_MS,
-                        _ => true,
-                    }
-                } else {
-                    !db.is_milestone_reached(&m.key).unwrap_or(false)
-                }
-            });
-
-            if candidates.is_empty() {
-                return;
-            }
-
-            // Sleep just before the fire so the user is past the
-            // just-pasted-text reading moment, and so a fullscreen-mode
-            // check below sees the actual current state, not the
-            // state-mid-injection.
-            std::thread::sleep(NOTIFY_DELAY);
-
-            if focused_app_is_fullscreen(&app) {
-                perf_log::append(&format!(
-                    "[notify] {} milestone(s) suppressed — focused window is fullscreen",
-                    candidates.len(),
-                ));
-                return;
-            }
-
-            for m in candidates {
-                perf_log::append(&format!(
-                    "[notify] firing milestone key={} title={:?}",
-                    m.key, m.title,
-                ));
-                if let Err(e) = app
-                    .notification()
-                    .builder()
-                    .title(&m.title)
-                    .body(&m.body)
-                    .show()
-                {
-                    perf_log::append(&format!("[notify] show failed: {e}"));
-                    continue;
-                }
-                // Record AFTER successful show so a failed notification
-                // doesn't burn the milestone. For throttled records we
-                // need to refresh the timestamp — use the upsert helper
-                // that always writes the current time.
-                if m.is_throttled {
-                    let _ = db.upsert_milestone_now(&m.key);
-                } else {
-                    let _ = db.record_milestone_reached(&m.key);
-                }
+            // Wrap the entire body in catch_unwind so any panic in the
+            // notification flow (DB query, Tauri notification plugin,
+            // Win32 monitor enumeration, etc) gets logged and the
+            // worker exits cleanly — instead of bubbling up to the
+            // process-wide panic = abort.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                check_and_fire_inner(app, db, settings, last_word_count, last_duration_ms);
+            }));
+            if let Err(e) = result {
+                let msg = e
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("<no message>");
+                perf_log::append(&format!("[notify] worker panicked: {msg}"));
             }
         })
         .expect("spawn notification thread");
+}
+
+fn check_and_fire_inner(
+    app: AppHandle,
+    db: Arc<Db>,
+    settings: Arc<SettingsStore>,
+    last_word_count: i64,
+    last_duration_ms: i64,
+) {
+    perf_log::append("[notify] worker started");
+
+    // Master toggle — bail before doing any work if the user turned
+    // notifications off.
+    if !settings.get().milestone_notifications {
+        perf_log::append("[notify] disabled in settings, bailing");
+        return;
+    }
+
+    // Pull totals fresh so we see the row we just inserted.
+    let totals = match db.usage_totals() {
+        Ok(t) => t,
+        Err(e) => {
+            perf_log::append(&format!("[notify] usage_totals failed: {e}"));
+            return;
+        }
+    };
+
+    let mut candidates: Vec<Milestone> = Vec::new();
+    candidates.extend(transcription_count_milestone(&totals));
+    candidates.extend(words_total_milestone(&totals));
+    candidates.extend(streak_milestone(&totals));
+    candidates.extend(personal_record_milestones(
+        &db,
+        last_word_count,
+        last_duration_ms,
+    ));
+
+    // Filter out anything we've already fired (lifetime keys) OR fired
+    // too recently (record-throttle keys).
+    let now = crate::db::unix_ms_now();
+    candidates.retain(|m| {
+        if m.is_throttled {
+            match db.milestone_reached_at(&m.key) {
+                Ok(Some(at)) => now - at > RECORD_THROTTLE_MS,
+                _ => true,
+            }
+        } else {
+            !db.is_milestone_reached(&m.key).unwrap_or(false)
+        }
+    });
+
+    if candidates.is_empty() {
+        perf_log::append("[notify] no fresh milestones to fire");
+        return;
+    }
+    perf_log::append(&format!(
+        "[notify] {} candidate milestone(s), sleeping before fire",
+        candidates.len()
+    ));
+
+    // Sleep just before the fire so the user is past the
+    // just-pasted-text reading moment, and so a fullscreen-mode check
+    // below sees the actual current state, not the state-mid-injection.
+    std::thread::sleep(NOTIFY_DELAY);
+
+    if focused_app_is_fullscreen(&app) {
+        perf_log::append(&format!(
+            "[notify] {} milestone(s) suppressed — focused window is fullscreen",
+            candidates.len(),
+        ));
+        return;
+    }
+
+    for m in candidates {
+        perf_log::append(&format!(
+            "[notify] firing milestone key={} title={:?}",
+            m.key, m.title,
+        ));
+        if let Err(e) = app
+            .notification()
+            .builder()
+            .title(&m.title)
+            .body(&m.body)
+            .show()
+        {
+            perf_log::append(&format!("[notify] show failed: {e}"));
+            continue;
+        }
+        // Record AFTER successful show so a failed notification
+        // doesn't burn the milestone. For throttled records we need to
+        // refresh the timestamp — use the upsert helper that always
+        // writes the current time.
+        if m.is_throttled {
+            let _ = db.upsert_milestone_now(&m.key);
+        } else {
+            let _ = db.record_milestone_reached(&m.key);
+        }
+    }
+    perf_log::append("[notify] worker done");
 }
 
 #[derive(Debug, Clone)]
