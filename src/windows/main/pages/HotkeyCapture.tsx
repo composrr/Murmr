@@ -2,9 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * Click-to-capture hotkey input. The user clicks the chip; we listen for the
- * next physical key (excluding the modifier keys themselves unless the user
- * specifically wants to bind a bare modifier — that's the common case for
- * dictation hotkeys, hence the `allowBareModifiers` prop).
+ * next physical key. Supports three chord shapes:
+ *
+ *   1. Bare modifier (when `allowBareModifiers` is true): press one modifier
+ *      and release it without pressing anything else. Result: "ControlRight",
+ *      "ShiftLeft", etc.
+ *   2. Modifier+key combo: hold one or more modifiers, press a non-modifier
+ *      key. Captured on the non-modifier keydown. Result: "Ctrl+Shift+KeyV".
+ *   3. Modifier+modifier chord: press two (or more) modifiers in sequence,
+ *      then release them all. Result: "Ctrl+MetaLeft" — the LAST-pressed
+ *      modifier becomes the "main key," everything pressed before it becomes
+ *      the chord prefix. (Added in v0.1.49 for users who want to bind
+ *      e.g. Ctrl+Win without involving a letter.) Only honored when
+ *      `allowBareModifiers` is on, since cancel-key style shortcuts probably
+ *      shouldn't be modifier-only either.
  *
  * Returns the rdev::Key debug name (e.g. "ControlRight", "F8", "Escape") via
  * `onChange` so it round-trips with the backend `Settings` struct.
@@ -37,12 +48,13 @@ export default function HotkeyCapture({
   useEffect(() => {
     if (!capturing) return;
 
-    // State: which modifiers are currently held + the rdev name of the FIRST
-    // modifier pressed. We use this to support "press a single bare modifier
-    // and release it" → bind to that modifier. If the user adds a non-
-    // modifier key BEFORE releasing, we capture the combo on that keydown.
+    // Track:
+    //  - which modifiers are currently held (so we know when all are released)
+    //  - the FULL press order across the capture session (so we can pick the
+    //    last-pressed modifier as the "main key" of a modifier+modifier chord
+    //    and the earlier-pressed ones as the chord prefix)
     const heldModifiers = new Set<string>();
-    let firstModifierRdev: string | null = null;
+    const pressOrder: string[] = []; // rdev names, in press order, no dupes
     let captured = false;
 
     function isModifierCode(code: string): boolean {
@@ -53,6 +65,18 @@ export default function HotkeyCapture({
         code === 'MetaLeft' || code === 'MetaRight' ||
         code === 'OSLeft' || code === 'OSRight'
       );
+    }
+
+    /// Browser-side helper: rdev name → chord-modifier short name ("Ctrl",
+    /// "Shift", "Alt", "Meta"). Mirrors hotkey/mod.rs's parse_chord — the
+    /// L/R distinction collapses into the same modifier slot. Returns null
+    /// for non-modifier keys (shouldn't happen in the call sites below).
+    function modifierShortName(rdev: string): string | null {
+      if (rdev === 'ControlLeft' || rdev === 'ControlRight') return 'Ctrl';
+      if (rdev === 'ShiftLeft' || rdev === 'ShiftRight') return 'Shift';
+      if (rdev === 'Alt' || rdev === 'AltGr') return 'Alt';
+      if (rdev === 'MetaLeft' || rdev === 'MetaRight') return 'Meta';
+      return null;
     }
 
     function handleKeyDown(e: KeyboardEvent) {
@@ -72,12 +96,14 @@ export default function HotkeyCapture({
       }
 
       if (isModifierCode(e.code)) {
-        // Track the modifier as held. Don't capture YET — wait to see if
-        // a non-modifier key comes next (combo) or if the user just
-        // releases the modifier (bare-modifier bind).
+        // Track the modifier as held + record press order. Don't capture
+        // YET — wait to see if a non-modifier key comes next (combo), if
+        // another modifier gets added (multi-modifier chord), or if the
+        // user just releases without adding more (bare modifier).
         heldModifiers.add(e.code);
-        if (firstModifierRdev === null) {
-          firstModifierRdev = browserKeyToRdev(e);
+        const rdev = browserKeyToRdev(e);
+        if (rdev && !pressOrder.includes(rdev)) {
+          pressOrder.push(rdev);
         }
         return;
       }
@@ -116,25 +142,52 @@ export default function HotkeyCapture({
 
       heldModifiers.delete(e.code);
 
-      // All modifiers released without a non-modifier in between → bare-
-      // modifier bind (only honored on rows that opted in).
-      if (heldModifiers.size === 0 && firstModifierRdev !== null && allowBareModifiers) {
-        const chord = firstModifierRdev;
-        if (forbidden?.includes(chord)) {
-          setError('That key is already used by another shortcut.');
-          firstModifierRdev = null;
-          return;
+      // Wait until ALL modifiers are released before deciding what to
+      // capture. If the user pressed just one and released → bare modifier.
+      // If two-or-more were pressed → modifier+modifier chord.
+      if (heldModifiers.size > 0 || pressOrder.length === 0) return;
+      if (!allowBareModifiers) {
+        // Rows that don't allow bare-modifier OR modifier+modifier (e.g.
+        // the cancel key) — just reset and let the user try again with a
+        // non-modifier follow-up.
+        pressOrder.length = 0;
+        return;
+      }
+
+      // Build the chord from press order.
+      //  - 1 modifier pressed total → bare modifier ("ControlRight")
+      //  - 2+ modifiers → last-pressed is the main key, earlier ones are
+      //    chord modifiers ("Ctrl+MetaLeft", "Ctrl+Shift+MetaRight")
+      let chord: string;
+      if (pressOrder.length === 1) {
+        chord = pressOrder[0];
+      } else {
+        const main = pressOrder[pressOrder.length - 1];
+        const prefixModifiers = new Set<string>();
+        for (let i = 0; i < pressOrder.length - 1; i++) {
+          const short = modifierShortName(pressOrder[i]);
+          if (short) prefixModifiers.add(short);
         }
-        captured = true;
-        onChange(chord);
-        setCapturing(false);
-        setError(null);
+        // Canonical order so "Shift+Ctrl+Win" and "Ctrl+Shift+Win" round-
+        // trip to the same string.
+        const orderedPrefix: string[] = [];
+        for (const m of ['Ctrl', 'Shift', 'Alt', 'Meta']) {
+          if (prefixModifiers.has(m)) orderedPrefix.push(m);
+        }
+        chord = [...orderedPrefix, main].join('+');
       }
-      // If allowBareModifiers is false and they released without a key,
-      // just reset state and let them try again.
-      if (heldModifiers.size === 0) {
-        firstModifierRdev = null;
+
+      if (forbidden?.includes(chord)) {
+        setError('That combination is already used by another shortcut.');
+        pressOrder.length = 0;
+        return;
       }
+
+      captured = true;
+      onChange(chord);
+      setCapturing(false);
+      setError(null);
+      pressOrder.length = 0;
     }
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -175,7 +228,7 @@ export default function HotkeyCapture({
           .filter(Boolean)
           .join(' ')}
       >
-        {capturing ? 'Press a key or combo…  (Esc to cancel)' : displayName(value)}
+        {capturing ? 'Press any key or combo…  (Esc to cancel)' : displayName(value)}
       </button>
       {error && (
         <span className="text-[11px] text-[#c14a2b] dark:text-[#e87a5e] leading-tight">{error}</span>
