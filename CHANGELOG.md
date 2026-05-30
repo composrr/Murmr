@@ -16,6 +16,21 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.46 — Fast "Check for updates"
+
+### Fixed
+
+- **"Check for updates" in Settings is now near-instant** instead of
+  taking 5–10 seconds. The shipping config had a local dev endpoint
+  (`http://127.0.0.1:8123`) listed *before* the public GitHub one —
+  used during local OTA testing, but users have nothing listening on
+  that port. Every check was waiting for the local connection to
+  refuse before falling through. Public config now points at GitHub
+  only; local OTA testing is still available via direct install from
+  `release-staging/`.
+
+---
+
 ## v0.1.45 — HUD self-heals on cold launch + wake-from-idle
 
 ### Fixed
