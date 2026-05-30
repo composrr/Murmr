@@ -16,6 +16,21 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.48 — Post-transcribe diagnostics
+
+### Improved
+
+- Added breadcrumb logs in `perf.log` along the entire post-transcribe
+  path (after Whisper, after postprocess, before/after inject, before/
+  after DB insert, before/after notification scheduling). Whichever
+  line is last in the log when a crash happens points at the
+  step that died.
+- Wrapped the milestone notification flow in `catch_unwind` on both
+  sides (controller dispatch + the spawned worker thread) so a panic
+  in that code path is logged and the app survives.
+
+---
+
 ## v0.1.47 — Stop crashing on dictation
 
 ### Fixed
