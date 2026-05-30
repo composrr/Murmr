@@ -16,6 +16,24 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.45 — HUD self-heals on cold launch + wake-from-idle
+
+### Fixed
+
+- **HUD now appears reliably even when first opening Murmr or
+  returning after a long idle.** You'd previously hear the start
+  chime but see no pill — the React app's listener for status
+  events sometimes wasn't ready when the first event fired (cold
+  launch race) or had been suspended by the OS (WebView sleeps
+  background windows after long idle). Two-layer fix: the
+  controller now re-emits `Status::Recording` at +120ms and +500ms
+  after the initial emit (idempotent — duplicate events are
+  no-ops), AND the HUD on mount asks Rust "are you currently
+  recording?" so it can self-heal if it missed the live event
+  entirely.
+
+---
+
 ## v0.1.44 — Audio duck no longer strands per-app volumes
 
 ### Fixed
