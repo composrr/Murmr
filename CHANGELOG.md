@@ -16,6 +16,21 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.49 — Bind any combination, including modifier+modifier
+
+### New
+
+- **Hotkey capture now accepts modifier-only combinations** like
+  Ctrl+Win, Alt+Shift, Ctrl+Alt, etc. Previously the chip required a
+  non-modifier "main key" or a single bare modifier. Now: press
+  whichever modifiers you want in any order and release them — the
+  last-pressed modifier becomes the "main key" of the chord and the
+  earlier ones become its modifiers. So pressing Ctrl→Win→release
+  binds to `Ctrl+MetaLeft`. The Rust matching layer already supported
+  this; the UI was the gate.
+
+---
+
 ## v0.1.48 — Post-transcribe diagnostics
 
 ### Improved
