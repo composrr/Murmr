@@ -16,6 +16,24 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.50 — Modifier+modifier hotkeys stop blocking system shortcuts
+
+### Fixed
+
+- **Binding dictation to a modifier+modifier chord (e.g.
+  `Ctrl+Win`) no longer breaks Windows system shortcuts** like
+  `Win+Ctrl+D` (new virtual desktop) or `Win+Ctrl+arrows` (switch
+  desktop). v0.1.49 enabled binding to those chords, but the
+  hotkey hook was still eating the Win press the instant Ctrl was
+  held. The deferred-commit + pass-through path that already
+  existed for bare-modifier hotkeys now covers *any* chord whose
+  main key is a modifier — the modifier flows through to the OS
+  for 80ms, and only commits to dictation if no third key arrives
+  in that window. So `Ctrl+Win+D` still creates a virtual desktop,
+  but holding `Ctrl+Win` alone for >80ms starts dictation.
+
+---
+
 ## v0.1.49 — Bind any combination, including modifier+modifier
 
 ### New
