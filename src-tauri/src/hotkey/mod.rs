@@ -64,11 +64,17 @@ fn is_modifier_key(k: Key) -> bool {
     )
 }
 
-/// True when the chord is just a bare modifier (no chord modifiers required,
-/// main key is itself a modifier). These need the deferred-commit treatment
-/// so they don't break combo shortcuts in the focused app.
-fn chord_is_bare_modifier(chord: &Chord) -> bool {
-    chord.modifiers.empty() && is_modifier_key(chord.key)
+/// True when the chord's MAIN KEY is itself a modifier — either a bare
+/// modifier chord (no chord prefix, e.g. `ControlRight`) OR a chord whose
+/// main key happens to be a modifier (e.g. `Ctrl+MetaLeft`).
+///
+/// Both cases need the deferred-commit + pass-through treatment so they
+/// don't break combo shortcuts in the focused app. Without this, binding
+/// dictation to `Ctrl+MetaLeft` would have Murmr eat the Win press the
+/// instant Ctrl is held — breaking every Win+Ctrl+X system shortcut
+/// (new virtual desktop, switch desktop, etc).
+fn chord_main_key_is_modifier(chord: &Chord) -> bool {
+    is_modifier_key(chord.key)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -380,13 +386,17 @@ struct PendingPress {
 /// Modifiers always pass through normally — otherwise binding to
 /// `Ctrl+Shift+V` would break every app's normal Ctrl handling.
 ///
-/// **Bare-modifier hotkeys (Ctrl/Shift/Alt/Meta) get special handling**: we
-/// don't suppress the press, AND we defer firing `DictationDown` by ~80ms
-/// so combos like Ctrl+V (where the user's holding our dictation modifier
-/// briefly as part of a shortcut) don't trigger an unwanted recording. Any
-/// non-modifier key pressed inside that 80ms window cancels the pending
-/// dictation. Push-to-talk loses 80ms at the start of the recording — a
-/// negligible cost for keeping system shortcuts working.
+/// **Hotkeys whose MAIN KEY is a modifier (Ctrl/Shift/Alt/Meta) get
+/// special handling**. This covers both bare-modifier chords (e.g.
+/// `ControlRight` alone) AND chords where the main key happens to be a
+/// modifier (e.g. `Ctrl+MetaLeft`). For these we don't suppress the
+/// press, AND we defer firing `DictationDown` by ~80ms so combos like
+/// `Ctrl+V` (where the user's holding our dictation modifier briefly as
+/// part of a shortcut) or `Win+Ctrl+D` (new virtual desktop) don't
+/// trigger an unwanted recording. Any non-modifier key pressed inside
+/// that 80ms window cancels the pending dictation. Push-to-talk loses
+/// 80ms at the start of the recording — a negligible cost for keeping
+/// system shortcuts working.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     crate::perf_log::append(&format!(
         "[hotkey] installing OS keyboard hook (dictation={:?}, cancel={:?}, repeat={:?})",
@@ -420,7 +430,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                     );
                 }
                 let cfg = *cfg_for_cb.read();
-                let dict_is_bare_mod = chord_is_bare_modifier(&cfg.dictation);
+                let dict_main_is_modifier = chord_main_key_is_modifier(&cfg.dictation);
 
                 // Snapshot modifier state PRIOR to applying this event so
                 // chords with bare-modifier main keys (e.g. main = ControlRight,
@@ -444,7 +454,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         // Cancel the pending press so DictationDown never
                         // fires. (Modifier-on-modifier presses don't count
                         // — pressing Shift while holding Ctrl is fine.)
-                        if dict_is_bare_mod
+                        if dict_main_is_modifier
                             && k != cfg.dictation.key
                             && !is_modifier_key(k)
                         {
@@ -455,7 +465,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         }
 
                         if matches_chord(&cfg.dictation, k) {
-                            if dict_is_bare_mod {
+                            if dict_main_is_modifier {
                                 // Defer the commit. Spawn a one-shot timer
                                 // that fires DictationDown after the delay
                                 // IF the press is still pending (i.e.
@@ -531,7 +541,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                     }
                     EventType::KeyRelease(k) => {
                         if k == cfg.dictation.key {
-                            if dict_is_bare_mod {
+                            if dict_main_is_modifier {
                                 // Bare-modifier release. Only fire
                                 // DictationUp if the press actually
                                 // committed (passed the 80ms threshold
