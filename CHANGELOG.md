@@ -16,6 +16,57 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.51 — Audit pass: HUD reliability + log resilience + chord ordering
+
+### Fixed
+
+- **HUD now appears reliably on cold launch and after long idle.**
+  Three layered race conditions resolved: (1) the React listener
+  for status events is now attached BEFORE the on-mount
+  `is_recording_active()` query, eliminating the gap where live
+  events could fire into the void; (2) the timed `Status::Recording`
+  re-emit threads now carry a session ID and silently skip if a
+  newer recording has started OR the current one has ended, so
+  stale events can't clobber the HUD's view; (3) the controller
+  fires a new `murmr:hud-shown` event after every `show_hud()`
+  which the HUD listens for and self-heals on receipt — a sharper
+  signal than timed re-emits for the WebView-suspended-during-emit
+  case.
+- **Modifier+modifier hotkeys (e.g. `Ctrl+Win`) now match
+  order-independently.** Previously the chord required the user to
+  press the chord-prefix modifier FIRST and the main key SECOND;
+  pressing them in the other order silently missed. Now the chord
+  fires as soon as ALL required keys are simultaneously held —
+  Ctrl-then-Win, Win-then-Ctrl, and both-at-once all work. Release
+  of EITHER key ends the recording. Bare modifier chords and
+  modifier+letter chords keep their original order-dependent
+  matching (letters are the natural trigger; bare modifiers need
+  L/R specificity).
+
+### Improved
+
+- **`perf.log` dual-write.** Every line now writes to BOTH the
+  primary `<app_data>/perf.log` AND a fallback `<exe_dir>/perf.log`
+  next to `murmr.exe`. If one path silently fails (permissions,
+  missing env var, Windows integrity-level quirks), the other
+  still captures the diagnostic trail — no more "the app is
+  running but logs vanish" mystery.
+- **`resolve_app_data_dir` fallbacks for Windows.** When `%APPDATA%`
+  isn't propagated by the launching process (which can happen with
+  some Explorer/shortcut launch contexts), we now construct the
+  Roaming path from `%USERPROFILE%` → `%LOCALAPPDATA%` → exe-
+  adjacent, rather than silently falling through to
+  `current_dir()` and writing settings/DB to the wrong place.
+- **Startup env diagnostics in `perf.log`.** New
+  `[startup] env present: APPDATA=... USERPROFILE=...` line so
+  future launch-context puzzles are diagnosable from a single
+  log paste.
+- **Listener cleanup.** HUD listener unregistration is now driven
+  off awaited promises, so rapid mount/unmount cycles (HUD
+  recreation, etc) can't leak event handlers anymore.
+
+---
+
 ## v0.1.50 — Modifier+modifier hotkeys stop blocking system shortcuts
 
 ### Fixed

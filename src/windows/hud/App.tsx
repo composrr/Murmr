@@ -51,9 +51,8 @@ export default function HudApp() {
   const accumulatedMsRef = useRef(0);
 
   useEffect(() => {
-    let unlistenStatus: UnlistenFn | null = null;
-    let unlistenRms: UnlistenFn | null = null;
     let cancelled = false;
+    const unlisteners: UnlistenFn[] = [];
 
     const resetCounters = () => {
       isSpeakingRef.current = false;
@@ -64,39 +63,46 @@ export default function HudApp() {
       setActiveSpeechMs(0);
     };
 
-    // Self-heal on mount. If Rust already started a recording before this
-    // component finished mounting (cold launch + immediate hotkey, or a
-    // WebView wake-from-suspend that missed the live event), promote the
-    // view to 'recording' immediately so the pill appears instead of an
-    // empty transparent window. Date.now() is the best we can do for
-    // startedAt — we don't know the actual press time, but the gap is
-    // small (sub-second in the cold-mount case).
-    isRecordingActive()
-      .then((active) => {
-        if (cancelled || !active) return;
-        if (lastSeenStateRef.current !== 'recording') resetCounters();
-        setView({ kind: 'recording', startedAt: Date.now() });
-        lastSeenStateRef.current = 'recording';
-      })
-      .catch((e) => console.error('isRecordingActive failed', e));
+    const enterRecordingView = () => {
+      if (lastSeenStateRef.current !== 'recording') resetCounters();
+      setView({ kind: 'recording', startedAt: Date.now() });
+      lastSeenStateRef.current = 'recording';
+    };
 
-    listenStatus((status) => {
+    // Cold-mount self-heal: ask Rust whether a recording is already in
+    // flight, then enter the recording view if so. Only runs AFTER all
+    // listeners are attached (see `boot` below) so we don't lose the
+    // intervening live event in the gap between query and listener
+    // registration.
+    const selfHeal = async () => {
+      try {
+        const active = await isRecordingActive();
+        if (cancelled || !active) return;
+        enterRecordingView();
+      } catch (e) {
+        console.error('isRecordingActive failed', e);
+      }
+    };
+
+    // --- Listener bodies (extracted so we can register them
+    // concurrently AND await them all before triggering self-heal) ---
+
+    const onStatus = (status: DictationStatus) => {
       if (cancelled) return;
       if (status.kind === 'recording') {
-        if (lastSeenStateRef.current !== 'recording') resetCounters();
-        setView({ kind: 'recording', startedAt: Date.now() });
+        enterRecordingView();
       } else if (status.kind === 'transcribing') {
         setView({ kind: 'thinking' });
+        lastSeenStateRef.current = 'transcribing';
       } else if (status.kind === 'cancelled' || status.kind === 'injected' || status.kind === 'error') {
         setView({ kind: 'hidden' });
+        lastSeenStateRef.current = status.kind;
+      } else {
+        lastSeenStateRef.current = status.kind;
       }
-      lastSeenStateRef.current = status.kind;
-    }).then((u) => {
-      if (cancelled) u();
-      else unlistenStatus = u;
-    });
+    };
 
-    listen<number>('murmr:audio-rms', (event) => {
+    const onRms = (event: { payload: number }) => {
       if (cancelled) return;
       const now = Date.now();
       const rms = event.payload;
@@ -135,21 +141,61 @@ export default function HudApp() {
           ? Math.max(0, lastAboveThresholdAtRef.current - speakingSinceRef.current)
           : 0;
       setActiveSpeechMs(accumulatedMsRef.current + inflight);
-    }).then((u) => {
-      if (cancelled) u();
-      else unlistenRms = u;
-    });
+    };
 
-    const debugListenerPromise = listen<{ text: string }>('murmr:hud-debug-result', (event) => {
+    const onDebugResult = (event: { payload: { text: string } }) => {
       if (cancelled) return;
       setView({ kind: 'result', text: event.payload.text });
-    });
+    };
+
+    // `murmr:hud-shown` is emitted by the controller after EVERY
+    // `show_hud()` call. Listening for it gives us a sharper signal than
+    // the timed re-emit fallback: even if `Status::Recording` was lost
+    // because the WebView was suspended at emit time, this event will
+    // fire as soon as the WebView resumes and processes the queued
+    // message. We re-query state on receipt to land in the right view.
+    const onHudShown = () => {
+      if (cancelled) return;
+      void selfHeal();
+    };
+
+    // Boot sequence: register every listener IN PARALLEL (Promise.all
+    // keeps the slowest one from blocking the others), THEN trigger the
+    // self-heal query. This guarantees the listener for Status events
+    // is alive before we ask Rust "what's the current state?" —
+    // anything emitted between mount and listener-ready is now caught
+    // by the listener itself; anything emitted before mount is caught
+    // by the self-heal. No coverage gap.
+    const boot = async () => {
+      try {
+        const results = await Promise.all([
+          listenStatus(onStatus),
+          listen<number>('murmr:audio-rms', onRms),
+          listen<{ text: string }>('murmr:hud-debug-result', onDebugResult),
+          listen('murmr:hud-shown', onHudShown),
+        ]);
+        if (cancelled) {
+          // Component unmounted while we were attaching — undo each
+          // listener so we don't leak event handlers.
+          for (const u of results) {
+            try { u(); } catch {}
+          }
+          return;
+        }
+        unlisteners.push(...results);
+      } catch (e) {
+        console.error('HUD listener attach failed', e);
+        return;
+      }
+      await selfHeal();
+    };
+    void boot();
 
     return () => {
       cancelled = true;
-      if (unlistenStatus) unlistenStatus();
-      if (unlistenRms) unlistenRms();
-      debugListenerPromise.then((u) => u());
+      for (const u of unlisteners) {
+        try { u(); } catch {}
+      }
     };
   }, []);
 

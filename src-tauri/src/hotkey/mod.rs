@@ -77,6 +77,47 @@ fn chord_main_key_is_modifier(chord: &Chord) -> bool {
     is_modifier_key(chord.key)
 }
 
+/// True when the chord is two-or-more modifiers (e.g. `Ctrl+MetaLeft`,
+/// `Alt+Shift`). For these we use ORDER-INDEPENDENT matching — the
+/// chord fires as soon as ALL required modifier keys are simultaneously
+/// held, regardless of which one the user pressed first. The user's
+/// hand isn't always going to land on Ctrl before Win; for a modifier-
+/// only chord there's no meaningful "main key" to anchor the press
+/// order against.
+///
+/// Bare modifier chords (just `ControlRight` alone, no prefix) stay
+/// order-dependent so they keep matching the SPECIFIC L/R key the user
+/// bound, not "any ctrl press."
+fn chord_is_multi_modifier(chord: &Chord) -> bool {
+    !chord.modifiers.empty() && is_modifier_key(chord.key)
+}
+
+/// True when every modifier required by `chord` (its `.modifiers`
+/// prefix AND its `.key` if that key is itself a modifier) is currently
+/// held according to `mods`. Order-independent. Returns false if the
+/// chord's main key isn't a modifier (callers should check
+/// `chord_is_multi_modifier` first).
+fn chord_modifier_state_satisfied(chord: &Chord, mods: &ModifierSet) -> bool {
+    if !is_modifier_key(chord.key) {
+        return false;
+    }
+    // All prefix modifiers must be held.
+    let required = &chord.modifiers;
+    let prefix_held = (!required.ctrl || mods.ctrl)
+        && (!required.shift || mods.shift)
+        && (!required.alt || mods.alt)
+        && (!required.meta || mods.meta);
+    // Main-key modifier must also be held.
+    let main_held = match chord.key {
+        Key::ControlLeft | Key::ControlRight => mods.ctrl,
+        Key::ShiftLeft | Key::ShiftRight => mods.shift,
+        Key::Alt | Key::AltGr => mods.alt,
+        Key::MetaLeft | Key::MetaRight => mods.meta,
+        _ => false,
+    };
+    prefix_held && main_held
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Chord {
     pub modifiers: ModifierSet,
@@ -414,6 +455,13 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     let tx_for_cb = tx.clone();
     let first_event_seen = Arc::new(AtomicBool::new(false));
     let first_event_for_cb = first_event_seen.clone();
+    // Tracks whether the dictation chord is CURRENTLY fully held. Only
+    // meaningful for multi-modifier dictation chords (e.g. Ctrl+Win) —
+    // we use it to detect held/released transitions on ANY modifier
+    // press or release, so the chord matches order-independently. For
+    // single-key / modifier+non-modifier chords this stays unused.
+    let chord_held = Arc::new(AtomicBool::new(false));
+    let chord_held_for_cb = chord_held.clone();
 
     std::thread::Builder::new()
         .name("murmr-hotkey".into())
@@ -431,6 +479,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                 }
                 let cfg = *cfg_for_cb.read();
                 let dict_main_is_modifier = chord_main_key_is_modifier(&cfg.dictation);
+                let dict_is_multi_mod = chord_is_multi_modifier(&cfg.dictation);
 
                 // Snapshot modifier state PRIOR to applying this event so
                 // chords with bare-modifier main keys (e.g. main = ControlRight,
@@ -440,8 +489,26 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                 let prior_mods = mods_for_cb.snapshot();
                 mods_for_cb.apply(&event.event_type);
 
+                // For multi-modifier dictation chords, compute the held/
+                // released TRANSITION on every event so the chord matches
+                // order-independently (Ctrl-then-Win works the same as
+                // Win-then-Ctrl). For other chord shapes (bare modifier,
+                // modifier+non-modifier) we use the original press-time
+                // match logic below.
+                let (dict_chord_just_held, dict_chord_just_released) = if dict_is_multi_mod {
+                    let now_held = chord_modifier_state_satisfied(
+                        &cfg.dictation,
+                        &mods_for_cb.snapshot(),
+                    );
+                    let was_held = chord_held_for_cb.swap(now_held, Ordering::Relaxed);
+                    (!was_held && now_held, was_held && !now_held)
+                } else {
+                    (false, false)
+                };
+
                 // Helper: does this event press the chord's main key with
-                // EXACTLY the right modifiers held?
+                // EXACTLY the right modifiers held? (Order-DEPENDENT — used
+                // for chords that aren't multi-modifier.)
                 let matches_chord = |chord: &Chord, k: Key| -> bool {
                     k == chord.key && prior_mods == chord.modifiers
                 };
@@ -464,7 +531,18 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                             }
                         }
 
-                        if matches_chord(&cfg.dictation, k) {
+                        // Was the dictation chord triggered by THIS event?
+                        //   - multi-modifier chords: chord just became fully held
+                        //     (regardless of press order)
+                        //   - everything else: exact main-key press with the
+                        //     required modifiers already held (existing logic)
+                        let dict_pressed = if dict_is_multi_mod {
+                            dict_chord_just_held
+                        } else {
+                            matches_chord(&cfg.dictation, k)
+                        };
+
+                        if dict_pressed {
                             if dict_main_is_modifier {
                                 // Defer the commit. Spawn a one-shot timer
                                 // that fires DictationDown after the delay
@@ -540,12 +618,26 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         }
                     }
                     EventType::KeyRelease(k) => {
-                        if k == cfg.dictation.key {
+                        // For multi-mod dictation chords: the release event
+                        // is "any required modifier no longer held."
+                        // dict_chord_just_released captured the transition
+                        // above (true on the event that brought chord_held
+                        // from true to false). For everything else, the
+                        // release event is "the chord's main key was
+                        // released."
+                        let dict_released = if dict_is_multi_mod {
+                            dict_chord_just_released
+                        } else {
+                            k == cfg.dictation.key
+                        };
+
+                        if dict_released {
                             if dict_main_is_modifier {
-                                // Bare-modifier release. Only fire
-                                // DictationUp if the press actually
-                                // committed (passed the 80ms threshold
-                                // without a combo cancelling it).
+                                // Bare-modifier OR multi-modifier release.
+                                // Only fire DictationUp if the press
+                                // actually committed (passed the 80ms
+                                // threshold without a combo cancelling
+                                // it).
                                 let was_committed = {
                                     let mut pp = pending_for_cb.lock();
                                     let c = pp.committed;

@@ -630,8 +630,40 @@ fn resolve_app_data_dir() -> PathBuf {
 
     #[cfg(target_os = "windows")]
     {
+        // Preferred: %APPDATA% (the canonical Roaming path on Windows).
         if let Ok(appdata) = std::env::var("APPDATA") {
             return PathBuf::from(appdata).join(identifier);
+        }
+        // Fallback A: construct from %USERPROFILE%. We've observed
+        // user-reported cases on Windows where the installed binary
+        // launches without %APPDATA% propagated by Explorer, so it
+        // would silently fall through to `current_dir()` and lose all
+        // settings/perf/db writes. %USERPROFILE% is set in almost
+        // every launch context (UAC-elevated processes, services,
+        // logon scripts, normal Explorer launch) so this is a strong
+        // backstop.
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(profile)
+                .join("AppData")
+                .join("Roaming")
+                .join(identifier);
+        }
+        // Fallback B: %LOCALAPPDATA% sibling — almost always set even
+        // when its Roaming counterpart isn't, and we can derive
+        // Roaming from it.
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            if let Some(parent) = PathBuf::from(local).parent() {
+                return parent.join("Roaming").join(identifier);
+            }
+        }
+        // Fallback C (last-resort): next to the running exe. NOT ideal
+        // (will be wiped on uninstall + can pollute Program Files
+        // installs) but better than current_dir which can be
+        // literally anywhere.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                return dir.join(identifier);
+            }
         }
     }
 
@@ -774,6 +806,19 @@ pub fn run() {
         "[startup] version={} target_os={}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
+    ));
+    // Launch-context env diagnostics. Useful when troubleshooting
+    // "Murmr is running but settings/db/perf aren't writing" — that
+    // turns out to be `%APPDATA%` not being propagated by the launching
+    // process (NSIS shortcut, Explorer, scheduled task, etc). Log
+    // presence (not values — these are paths, not secrets, but keeping
+    // the line short).
+    #[cfg(target_os = "windows")]
+    perf_log::append(&format!(
+        "[startup] env present: APPDATA={} USERPROFILE={} LOCALAPPDATA={}",
+        std::env::var_os("APPDATA").is_some(),
+        std::env::var_os("USERPROFILE").is_some(),
+        std::env::var_os("LOCALAPPDATA").is_some(),
     ));
 
     // Install a panic hook so unexpected panics on background threads —

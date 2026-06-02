@@ -12,9 +12,26 @@
 //!   Toggled ──Down──▶ stop+transcribe ▶ Idle
 //!   any non-Idle ──Esc──▶ cancel ▶ Idle
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Monotonically increasing recording-session counter. Each new
+/// `DictationDown` press bumps it. Background workers (the HUD
+/// re-emit thread) capture the value at spawn time and compare to
+/// the current value before firing — stale workers from a previous
+/// session no-op, which prevents a delayed `Status::Recording`
+/// from a recording that's already complete from clobbering the
+/// HUD's view during a fresh dictation.
+static RECORDING_SESSION: AtomicU64 = AtomicU64::new(0);
+
+fn next_recording_session() -> u64 {
+    RECORDING_SESSION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+fn current_recording_session() -> u64 {
+    RECORDING_SESSION.load(Ordering::Relaxed)
+}
 
 use crossbeam_channel::Receiver;
 use parking_lot::Mutex;
@@ -138,7 +155,10 @@ impl Controller {
             // License gate removed in v0.1.23 — Murmr is free for anyone.
             match (ev, state) {
                 (HotkeyEvent::DictationDown { pressed_at }, RecState::Idle) => {
-                    perf_log::append("[ctrl] DictationDown received → start_recording");
+                    let session = next_recording_session();
+                    perf_log::append(&format!(
+                        "[ctrl] DictationDown received → start_recording (session={session})"
+                    ));
                     if let Err(e) = self.start_recording() {
                         perf_log::append(&format!("[ctrl] start_recording failed: {e}"));
                         self.sounds.play_error_beep();
@@ -165,7 +185,9 @@ impl Controller {
                     // WebView just woke from idle, etc). The HUD's
                     // recording-state reducer is idempotent — duplicate
                     // events are no-ops, so it's safe to fire several.
-                    self.reemit_recording_after_show();
+                    // The `session` arg keeps stale workers from a prior
+                    // recording from firing into a fresh session.
+                    self.reemit_recording_after_show(session);
                 }
 
                 (HotkeyEvent::DictationDown { .. }, RecState::Toggled) => {
@@ -655,6 +677,16 @@ impl Controller {
                 perf_log::append(&format!("[hud] fallback positioning failed: {e}"));
             }
         }
+
+        // Tell the HUD's React app "you've just been shown — re-query
+        // current state and render the right view." This is a sharper
+        // signal than the timed Status::Recording re-emits: even if
+        // every prior emit was lost (cold launch, WebView suspended at
+        // emit time, etc.) this event will fire after the WebView
+        // resumes and drain its message queue, and the HUD's
+        // `murmr:hud-shown` listener will trigger a self-heal that
+        // calls `is_recording_active` and lands in the right view.
+        let _ = self.app.emit("murmr:hud-shown", ());
     }
 
     fn hide_hud(&self) {
@@ -670,9 +702,19 @@ impl Controller {
     /// woke from WebView2's process freezer). Spawned on a worker
     /// thread so it doesn't block the controller's hot path.
     ///
-    /// The HUD reducer is idempotent — receiving Status::Recording
-    /// multiple times while already in `recording` view is a no-op.
-    fn reemit_recording_after_show(&self) {
+    /// `session` is the recording session ID at spawn time; if it no
+    /// longer matches the current session by the time the delay
+    /// elapses, the user has moved on (this recording ended and a new
+    /// one may already be in progress) and we silently skip the emit.
+    /// Without this, a delayed re-emit from a previous recording could
+    /// override the HUD's view AFTER a fresh dictation's
+    /// `Status::Transcribing` arrived, leaving the pill in the wrong
+    /// state.
+    ///
+    /// The HUD reducer is idempotent for in-session duplicates —
+    /// receiving Status::Recording multiple times while already in
+    /// `recording` view is a no-op.
+    fn reemit_recording_after_show(&self, session: u64) {
         let app = self.app.clone();
         std::thread::Builder::new()
             .name("murmr-hud-resync".into())
@@ -683,6 +725,16 @@ impl Controller {
                 // WebView coming out of deep suspend.
                 for delay_ms in [120u64, 500u64] {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                    if current_recording_session() != session
+                        || !hotkey::is_recording_active()
+                    {
+                        // Either a newer session is in flight OR this
+                        // session has ended (recording completed,
+                        // cancelled, or Toggled→completed). Either way,
+                        // skipping the emit avoids clobbering the HUD's
+                        // current view with a stale Recording event.
+                        return;
+                    }
                     let _ = app.emit("murmr:status", Status::Recording);
                 }
             })
