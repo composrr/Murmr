@@ -16,6 +16,29 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.54 — Fix illegal-instruction crash on transcribe (disable AVX-512)
+
+### Fixed
+
+- **Murmr no longer crashes during transcription** on machines
+  whose CPUs trip on whisper.cpp's AVX-512 codegen. The reported
+  symptom: Murmr would die silently right after the start chime
+  ("after translating," `STATUS_ILLEGAL_INSTRUCTION` in Windows
+  Event Log). Whisper builds with AVX-512 enabled emit at least
+  one instruction that some AVX-512-capable CPUs reject at the
+  microarchitecture level even though cpuid claims support.
+- Build now forces `GGML_NATIVE=OFF` and disables every
+  `GGML_AVX512*` codegen path in whisper.cpp's CMake, both in
+  `scripts/release-beta.mjs` (local builds) and
+  `.github/workflows/release.yml` (CI / OTA releases). Trade-off:
+  on real AVX-512-capable Intel Xeons we leave a bit of inference
+  throughput on the table, but every CPU now produces correct
+  results without crashing. AVX2 is still enabled — performance
+  on consumer chips (AMD Zen 2/3/4/5, Intel non-server) is
+  effectively unchanged.
+
+---
+
 ## v0.1.53 — Diagnostics: full hotkey-chord logging
 
 ### Improved

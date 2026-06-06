@@ -128,6 +128,24 @@ jobs:
           # Setting only the first is what failed v0.1.11 twice.
           MACOSX_DEPLOYMENT_TARGET: '13.0'
           CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
+          # AVX-512 crash workaround (v0.1.54): force whisper.cpp's GGML
+          # build to skip every AVX-512 codegen path. At least one user's
+          # CPU advertises AVX-512 in cpuid but trips
+          # STATUS_ILLEGAL_INSTRUCTION on a specific AVX-512 instruction
+          # whisper emits. Builds with AVX-512 disabled run on
+          # everything; we trade a bit of inference throughput on Intel
+          # AVX-512-capable CPUs for not-crashing on the affected ones.
+          # whisper-rs-sys's build.rs forwards any env var starting with
+          # GGML_/WHISPER_/CMAKE_ to its CMake config as a -D define, so
+          # setting these here is enough to take effect. GGML_NATIVE=OFF
+          # also stops CMakeLists.txt from adding -march=native (which
+          # would re-enable AVX-512 at the compiler level even when the
+          # ggml dispatcher is told to skip its AVX-512 code paths).
+          GGML_NATIVE: 'OFF'
+          GGML_AVX512: 'OFF'
+          GGML_AVX512_VBMI: 'OFF'
+          GGML_AVX512_VNNI: 'OFF'
+          GGML_AVX512_BF16: 'OFF'
         run: |
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             npm run tauri build -- --target ${{ matrix.target }}

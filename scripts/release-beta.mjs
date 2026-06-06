@@ -152,11 +152,34 @@ if (newVersion !== oldVersion) {
 
 // --- Step 2: build ---------------------------------------------------------
 
+// AVX-512 crash fix (v0.1.54): force whisper.cpp's GGML build to skip
+// every AVX-512 codegen path. The user's CPU shows AVX512=1 in cpuid
+// but trips STATUS_ILLEGAL_INSTRUCTION on at least one specific
+// AVX-512 instruction whisper emits — the build with AVX-512 disabled
+// runs fine. whisper-rs-sys's build.rs forwards any env var starting
+// with `GGML_`, `WHISPER_`, or `CMAKE_` to its CMake config as a
+// `-D` define, so setting these here is enough to take effect.
+//
+// GGML_NATIVE=OFF stops the CMakeLists.txt from also adding
+// `-march=native`, which could otherwise quietly turn AVX-512 back on
+// at the compiler level even when our explicit GGML_AVX512=OFF tells
+// ggml's own dispatcher to skip its AVX-512 code paths.
+const noAvx512Env = {
+  ...process.env,
+  GGML_NATIVE: 'OFF',
+  GGML_AVX512: 'OFF',
+  GGML_AVX512_VBMI: 'OFF',
+  GGML_AVX512_VNNI: 'OFF',
+  GGML_AVX512_BF16: 'OFF',
+};
+
 if (!skipBuild) {
   console.log('[release-beta] running npm run tauri build (this takes 3-5 min)');
+  console.log('[release-beta] GGML AVX-512 codegen disabled (see noAvx512Env comment)');
   execSync('npm run tauri build', {
     cwd: ROOT,
     stdio: 'inherit',
+    env: noAvx512Env,
   });
 } else {
   console.log('[release-beta] --skip-build set, regenerating manifest from existing artifacts');
