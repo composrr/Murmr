@@ -23,8 +23,10 @@
 //!   restore is "good enough" but not perfectly per-session. v0.1.44 tried
 //!   to key by session_instance_id (PWSTR from GetSessionInstanceIdentifier)
 //!   to fix this, but the PWSTR handling crashed mid-dictation on user
-//!   machines (STATUS_ILLEGAL_INSTRUCTION). Until we have a safer per-
-//!   session approach, the PID-keyed restore is what we ship.
+//!   machines (STATUS_ILLEGAL_INSTRUCTION). v0.1.52 tried a MAX-over-PID
+//!   heuristic but it didn't actually help the Apex Legends case the user
+//!   reported (still under investigation — likely a different cause).
+//!   For now we keep the PID-keyed last-wins restore.
 //!
 //!   Sessions whose process exited between duck/unduck just disappear from
 //!   the enumeration and are silently dropped.

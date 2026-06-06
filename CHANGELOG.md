@@ -16,6 +16,28 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.53 — Diagnostics: full hotkey-chord logging
+
+### Improved
+
+- The startup `[hotkey] installing OS keyboard hook` log line in
+  `perf.log` now shows the FULL chord (modifiers + main key) for
+  each binding, not just the main key. Lines used to read
+  `dictation=MetaLeft, repeat=Some(KeyV)` (ambiguous — could be
+  bare keys or modifier combos) and now read
+  `dictation=Ctrl+MetaLeft, repeat=Ctrl+Shift+KeyV` (or
+  `<bare> KeyV` if it really is just bare V). Makes "my hotkey
+  is doing weird stuff" reports diagnosable from one log line.
+
+### Reverted
+
+- The v0.1.52 audio-duck MAX-per-PID heuristic — didn't actually
+  help the Apex Legends "audio stays quieter after dictation"
+  case the user reported. Behavior is back to v0.1.51's PID-keyed
+  last-wins restore. Investigation continues with better logs.
+
+---
+
 ## v0.1.51 — Audit pass: HUD reliability + log resilience + chord ordering
 
 ### Fixed

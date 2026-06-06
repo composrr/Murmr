@@ -46,6 +46,33 @@ impl ModifierSet {
     }
 }
 
+/// Human-readable chord rendering for `perf.log` so we can see the
+/// FULL chord (modifiers + main key) rather than just the main key —
+/// e.g. "Ctrl+MetaLeft" instead of just "MetaLeft", or "<bare> KeyV"
+/// vs "Ctrl+Shift+KeyV". Saves a lot of guessing when a user reports
+/// "my hotkey is weird."
+fn format_chord(chord: &Chord) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if chord.modifiers.ctrl {
+        parts.push("Ctrl");
+    }
+    if chord.modifiers.shift {
+        parts.push("Shift");
+    }
+    if chord.modifiers.alt {
+        parts.push("Alt");
+    }
+    if chord.modifiers.meta {
+        parts.push("Meta");
+    }
+    let main = format!("{:?}", chord.key);
+    if parts.is_empty() {
+        format!("<bare> {main}")
+    } else {
+        format!("{}+{main}", parts.join("+"))
+    }
+}
+
 /// True when this key is a modifier-only physical key (any Ctrl/Shift/Alt/Meta).
 /// These keys never type a character on their own, so when bound as a bare
 /// dictation hotkey we can pass them through to the OS — apps need to see
@@ -440,10 +467,14 @@ struct PendingPress {
 /// system shortcuts working.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     crate::perf_log::append(&format!(
-        "[hotkey] installing OS keyboard hook (dictation={:?}, cancel={:?}, repeat={:?})",
-        initial_config.dictation.key,
-        initial_config.cancel.key,
-        initial_config.repeat.map(|c| c.key),
+        "[hotkey] installing OS keyboard hook (dictation={}, cancel={}, repeat={})",
+        format_chord(&initial_config.dictation),
+        format_chord(&initial_config.cancel),
+        initial_config
+            .repeat
+            .as_ref()
+            .map(format_chord)
+            .unwrap_or_else(|| "<none>".into()),
     ));
     *config_handle().write() = initial_config;
 
