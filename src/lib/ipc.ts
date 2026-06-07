@@ -236,6 +236,9 @@ export interface Settings {
   /** Show OS notifications for milestone events (100th transcription,
    * week streaks, personal bests). Default true. */
   milestone_notifications: boolean;
+  /** Ignore the dictation hotkey while a fullscreen app (game, video,
+   * presentation) is focused. Default true. */
+  pause_during_fullscreen: boolean;
 }
 
 export function getSettings(): Promise<Settings> {

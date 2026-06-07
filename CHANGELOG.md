@@ -16,6 +16,32 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.56 — Pause Murmr in fullscreen apps (games, etc)
+
+### New
+
+- **Murmr now ignores the dictation hotkey while a fullscreen app
+  is focused.** Three wins from one setting:
+  1. **No more stuck state in games** — the v0.1.55 recovery
+     path catches it after the fact; this prevents it from
+     happening in the first place. The hotkey just passes
+     through, no recording starts, no audio ducks.
+  2. **No accidental in-game triggers** — your dictation key is
+     probably also a key you use in-game. Murmr now stays out
+     of the way until you alt-tab.
+  3. **Less anti-cheat surface** — anti-cheat systems
+     (EasyAntiCheat, Vanguard, BattlEye) get nervous about apps
+     that act on global keyboard hooks during competitive
+     gameplay. While the hook itself is still installed (so we
+     can resume the instant you alt-tab), we no longer fire
+     dictation events while a fullscreen game has focus.
+  Toggle is at **Settings → Preferences → Games & fullscreen
+  apps** if you specifically want Murmr to dictate inside a
+  fullscreen app — e.g. note-taking in a fullscreen browser.
+  Default ON.
+
+---
+
 ## v0.1.55 — Recover from fullscreen-game-ate-the-key-release
 
 ### Fixed

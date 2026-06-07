@@ -173,3 +173,52 @@ pub fn focused_window_screen_rect() -> Option<ScreenRect> {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fullscreen detection (foreground window covers an entire monitor)
+// ---------------------------------------------------------------------------
+
+/// True when the foreground window's bounding rect matches its
+/// monitor's full bounds (within a few pixels of tolerance). Catches
+/// fullscreen games, video players, and presentations. False
+/// positives (a maximized window with no taskbar that happens to
+/// cover the whole monitor) are mostly harmless — they just suppress
+/// dictation in cases where the user probably wanted it anyway.
+///
+/// Uses MonitorFromWindow + GetMonitorInfo so we don't depend on
+/// Tauri's monitor enumeration (the hotkey thread doesn't have an
+/// AppHandle to call available_monitors on).
+pub fn is_foreground_fullscreen() -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONULL,
+    };
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_null() {
+            return false;
+        }
+        let mut win_rc: RECT = std::mem::zeroed();
+        if GetWindowRect(fg, &mut win_rc) == 0 {
+            return false;
+        }
+        let mon: HMONITOR = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
+        if mon.is_null() {
+            return false;
+        }
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(mon, &mut info) == 0 {
+            return false;
+        }
+        // Compare the foreground window's bounding rect to the
+        // monitor's TOTAL bounds (rcMonitor, not rcWork — fullscreen
+        // apps hide the taskbar so we want the full monitor area).
+        // A few pixels of tolerance to absorb DPI rounding.
+        let mon_rc = info.rcMonitor;
+        let win_w = win_rc.right - win_rc.left;
+        let win_h = win_rc.bottom - win_rc.top;
+        let mon_w = mon_rc.right - mon_rc.left;
+        let mon_h = mon_rc.bottom - mon_rc.top;
+        (win_w - mon_w).abs() <= 4 && (win_h - mon_h).abs() <= 4
+    }
+}

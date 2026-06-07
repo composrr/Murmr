@@ -92,6 +92,17 @@ pub struct Settings {
     /// Off → notifications are computed but never shown.
     #[serde(default = "default_true")]
     pub milestone_notifications: bool,
+
+    /// When true, ignore the dictation hotkey while a fullscreen app
+    /// (game, video, presentation) has focus. Prevents (a) the stuck-
+    /// hotkey state where fullscreen exclusive games eat the key
+    /// release, (b) accidental in-game triggers, (c) Murmr's global
+    /// keyboard hook looking like macroing software to anti-cheat
+    /// systems on the keypress side. The hook itself stays installed
+    /// — only the dictation match is suppressed — so alt-tabbing out
+    /// resumes normal behavior instantly. Default ON.
+    #[serde(default = "default_true")]
+    pub pause_during_fullscreen: bool,
 }
 
 fn default_true() -> bool {
@@ -154,6 +165,7 @@ impl Default for Settings {
             has_completed_onboarding: false,
             display_name: String::new(),
             milestone_notifications: true,
+            pause_during_fullscreen: true,
         }
     }
 }

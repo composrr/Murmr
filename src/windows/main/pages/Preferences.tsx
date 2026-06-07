@@ -139,6 +139,17 @@ export default function Preferences() {
         />
       </Row>
 
+      <SectionHeader>Games &amp; fullscreen apps</SectionHeader>
+      <Row
+        name="Pause Murmr in fullscreen apps"
+        hint="Ignore the dictation hotkey while a fullscreen game, video, or presentation is focused. Prevents accidental triggers in-game and the stuck-state bug where fullscreen exclusive games eat the key release. Murmr resumes the instant you alt-tab out."
+      >
+        <Toggle
+          on={settings.pause_during_fullscreen}
+          onChange={(v) => update({ pause_during_fullscreen: v })}
+        />
+      </Row>
+
       <SectionHeader>Post-processing</SectionHeader>
       <Row name="Auto-capitalize" hint="Sentence starts and standalone i → I">
         <Toggle on={settings.auto_capitalize} onChange={(v) => update({ auto_capitalize: v })} />

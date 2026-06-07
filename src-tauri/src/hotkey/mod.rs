@@ -396,6 +396,21 @@ pub fn is_recording_active() -> bool {
     RECORDING_ACTIVE.load(Ordering::Relaxed)
 }
 
+/// When true (and we detect a fullscreen app is focused on the
+/// foreground monitor), the hotkey thread silently skips its dictation
+/// match — pass key events through to the OS untouched. Default true,
+/// flipped at startup from `settings.pause_during_fullscreen` and
+/// re-pushed on every save_settings.
+static PAUSE_DURING_FULLSCREEN: AtomicBool = AtomicBool::new(true);
+
+pub fn set_pause_during_fullscreen(pause: bool) {
+    PAUSE_DURING_FULLSCREEN.store(pause, Ordering::Relaxed);
+}
+
+fn pause_during_fullscreen_enabled() -> bool {
+    PAUSE_DURING_FULLSCREEN.load(Ordering::Relaxed)
+}
+
 // ---------------------------------------------------------------------------
 // Listener
 // ---------------------------------------------------------------------------
@@ -572,6 +587,25 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         } else {
                             matches_chord(&cfg.dictation, k)
                         };
+
+                        // Fullscreen gate: when enabled (default), pass
+                        // dictation-chord presses through to the OS while
+                        // a fullscreen app is focused. Prevents the stuck-
+                        // state bug from fullscreen games eating the key
+                        // release, accidental in-game triggers, and the
+                        // worst-case anti-cheat optics of Murmr's hotkey
+                        // firing inside a competitive game. The hook
+                        // itself stays installed — alt-tab and dictation
+                        // resumes instantly.
+                        if dict_pressed
+                            && pause_during_fullscreen_enabled()
+                            && crate::focus::is_foreground_fullscreen()
+                        {
+                            crate::perf_log::append(
+                                "[hotkey] dictation press suppressed — fullscreen app focused (pause_during_fullscreen=true)",
+                            );
+                            return Some(event);
+                        }
 
                         if dict_pressed {
                             if dict_main_is_modifier {

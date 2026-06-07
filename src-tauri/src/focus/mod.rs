@@ -54,3 +54,23 @@ pub fn focused_window_screen_rect() -> Option<ScreenRect> {
 pub fn focused_window_screen_rect() -> Option<ScreenRect> {
     None
 }
+
+/// True when the currently-focused window covers an entire monitor's
+/// bounds — i.e. it's a fullscreen game, video player, or
+/// presentation. Used by the hotkey thread to optionally pause
+/// dictation while a fullscreen app is focused (so we don't fight
+/// the OS for the key release, accidentally trigger in-game, or
+/// look like macroing to anti-cheat software).
+///
+/// Cheap to call — one GetForegroundWindow + one MonitorFromWindow +
+/// one GetMonitorInfo on Windows. Returns false on platforms where
+/// we don't have a native implementation.
+#[cfg(windows)]
+pub fn is_foreground_fullscreen() -> bool {
+    windows::is_foreground_fullscreen()
+}
+
+#[cfg(not(windows))]
+pub fn is_foreground_fullscreen() -> bool {
+    false
+}

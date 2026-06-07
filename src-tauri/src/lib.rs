@@ -290,6 +290,7 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
         &new_settings.cancel_hotkey,
     );
     hotkey::update_config(new_hotkeys);
+    hotkey::set_pause_during_fullscreen(new_settings.pause_during_fullscreen);
 
     state.settings.replace(new_settings)
 }
@@ -937,6 +938,7 @@ pub fn run() {
             let (hotkey_tx, hotkey_rx) = crossbeam_channel::unbounded();
             let initial_hotkeys = {
                 let s = settings.get();
+                hotkey::set_pause_during_fullscreen(s.pause_during_fullscreen);
                 hotkey::config_from_strings(
                     &s.dictation_hotkey,
                     &s.repeat_hotkey,
