@@ -85,6 +85,14 @@ const VAD_RMS_THRESHOLD: f32 = 0.015;
 /// otherwise stays quiet.
 const VAD_MIN_SPEECH_CHUNKS: usize = 3;
 
+/// Maximum a recording can run before our watchdog assumes the
+/// release event was lost (typical cause: a fullscreen game ate the
+/// key release before our global hook saw it) and force-unducks
+/// audio. Set high enough that no real dictation can hit it (normal
+/// dictations finish in seconds, long ones in minutes) but short
+/// enough that a stuck state self-recovers within one cup of coffee.
+const MAX_RECORDING_DURATION: Duration = Duration::from_secs(10 * 60);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecState {
     Idle,
@@ -179,6 +187,20 @@ impl Controller {
                     self.emit(Status::Recording);
                     self.show_hud();
                     self.sounds.play_start_click();
+                    // Belt-and-suspenders watchdog: if NO release event
+                    // fires within MAX_RECORDING duration (10 min — far
+                    // longer than any real dictation), assume the key
+                    // release got swallowed by a fullscreen game or
+                    // similar exclusive-keyboard-grabber, and synthesize
+                    // a DictationUp so the recording completes + audio
+                    // unducks. Tagged with `session` so a stale watchdog
+                    // from a prior recording can't fire into a fresh
+                    // one. The recovery DictationDown-in-HoldUncertain
+                    // arm below is the primary path when the user
+                    // notices and presses again; this catches the case
+                    // where they don't notice at all (walked away,
+                    // alt-tabbed and didn't think to retry, etc).
+                    self.spawn_max_duration_watchdog(session);
                     // Re-emit Status::Recording on a short delay tail —
                     // catches the cases where the HUD's React listener
                     // wasn't ready for the first emit (app just opened,
@@ -239,7 +261,32 @@ impl Controller {
                 }
 
                 (HotkeyEvent::EscDown, RecState::Idle) => {}
-                (HotkeyEvent::DictationDown { .. }, RecState::HoldUncertain) => {}
+
+                // Recovery path: a second DictationDown arrives while we
+                // think we're still in HoldUncertain from the LAST press.
+                // In normal operation this never fires — the press handler
+                // in hotkey/mod.rs only emits DictationDown ONCE per
+                // chord-held period, not on auto-repeat. So if we see
+                // one here, the previous release was lost — typically
+                // because a fullscreen game (Apex Legends, etc) ate the
+                // key release before our global hook saw it. Without this
+                // arm the controller was stuck in HoldUncertain forever:
+                // audio stayed ducked, subsequent presses silently
+                // no-op'd, the user had to restart Murmr to recover.
+                //
+                // Treat the second press as "complete the orphaned
+                // recording, then go back to Idle." User can press the
+                // hotkey one more time to start a fresh recording.
+                (HotkeyEvent::DictationDown { .. }, RecState::HoldUncertain) => {
+                    perf_log::append(
+                        "[ctrl] DictationDown in HoldUncertain → previous release lost, completing + recovering",
+                    );
+                    state = RecState::Idle;
+                    hotkey::set_recording_active(false);
+                    press_at = None;
+                    self.sounds.play_complete_chime();
+                    self.complete_recording();
+                }
 
                 // Re-paste the most recent transcription. Ignored mid-recording
                 // (would interfere with the active dictation flow).
@@ -737,6 +784,37 @@ impl Controller {
                     }
                     let _ = app.emit("murmr:status", Status::Recording);
                 }
+            })
+            .ok();
+    }
+
+    /// Belt-and-suspenders cleanup for "release event got eaten by a
+    /// fullscreen game / exclusive-keyboard-grab and the user walked
+    /// away." Sleeps for the max-recording duration and, if our session
+    /// is STILL marked active by then, force-unducks audio so the
+    /// user's other apps don't sit at half-volume indefinitely. Does
+    /// NOT touch controller state — the user's next hotkey press (or
+    /// Esc) goes through the recovery arm above and restores the state
+    /// machine cleanly; this just handles the audio side while we
+    /// wait.
+    ///
+    /// `session` keeps stale watchdogs from a prior recording from
+    /// firing into a fresh one — same pattern as the HUD re-emit.
+    fn spawn_max_duration_watchdog(&self, session: u64) {
+        std::thread::Builder::new()
+            .name("murmr-max-duration".into())
+            .spawn(move || {
+                std::thread::sleep(MAX_RECORDING_DURATION);
+                if current_recording_session() != session
+                    || !hotkey::is_recording_active()
+                {
+                    return;
+                }
+                perf_log::append(&format!(
+                    "[ctrl] max-duration watchdog (session={session}) — recording exceeded {}m, force-unducking audio (state machine recovers on next hotkey press)",
+                    MAX_RECORDING_DURATION.as_secs() / 60,
+                ));
+                audio_duck::unduck();
             })
             .ok();
     }

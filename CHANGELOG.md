@@ -16,6 +16,32 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.55 — Recover from fullscreen-game-ate-the-key-release
+
+### Fixed
+
+- **Murmr no longer gets stuck after a fullscreen game (Apex
+  Legends, etc) eats the dictation key release.** Previously the
+  sequence — press hotkey while Apex focused → press registers and
+  starts recording + ducks audio → game eats the release → controller
+  stays in `HoldUncertain` forever — left audio ducked indefinitely
+  AND made the hotkey appear "dead" (subsequent presses silently
+  no-op'd). The only recovery was quitting Murmr. Two fixes:
+  - **Press again to recover** — a second `DictationDown` while in
+    `HoldUncertain` now treats the prior recording as complete
+    (transcribes whatever was captured, unducks audio, returns to
+    Idle) instead of being ignored. So if you notice the stuck
+    state, alt-tab out of the game and tap your hotkey one more
+    time; everything resets.
+  - **Walk-away watchdog** — every recording also spawns a quiet
+    10-minute timer; if the recording is still active when it
+    fires (which only happens if release was lost and the user
+    didn't press again), it force-unducks audio so other apps
+    don't sit at half volume waiting for you. Sessioned so a
+    stale watchdog can't fire into a fresh recording.
+
+---
+
 ## v0.1.54 — Fix illegal-instruction crash on transcribe (disable AVX-512)
 
 ### Fixed
