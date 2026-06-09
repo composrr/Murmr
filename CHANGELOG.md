@@ -16,6 +16,24 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.57 — Only one Murmr at a time
+
+### Fixed
+
+- **Murmr now enforces a single running instance.** If a second
+  copy launches (e.g. an autostart entry plus a manual launch), it
+  hands off to the already-running one and exits instead of starting
+  a competing process. Two instances meant two global keyboard hooks
+  AND two independent audio-duck managers fighting over your per-app
+  volumes — one would duck, the other would duck again over the
+  already-lowered value and save *that* as the "original," so on
+  release your audio never came back. That whole class of
+  duck-never-returns weirdness from an accidental double-launch is
+  gone. Re-launching while Murmr is already running now just surfaces
+  the existing window.
+
+---
+
 ## v0.1.56 — Pause Murmr in fullscreen apps (games, etc)
 
 ### New

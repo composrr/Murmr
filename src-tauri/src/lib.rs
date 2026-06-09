@@ -904,6 +904,24 @@ pub fn run() {
     perf_log::append("[startup] state ready, starting Tauri builder");
 
     let builder = tauri::Builder::default()
+        // Single-instance guard MUST be the first plugin registered so it
+        // runs before anything else touches global state. When a second
+        // Murmr launches, this plugin hands the new process's argv to the
+        // already-running instance (firing the callback below) and the
+        // second process exits during builder init — crucially BEFORE
+        // setup() runs, so it never installs a second keyboard hook or a
+        // second audio-duck manager. That double-hook + duck race was the
+        // cause of "audio ducks and never comes back" after an accidental
+        // double-launch (autostart entry + manual launch, etc).
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            perf_log::append(
+                "[startup] second instance launch detected — surfacing existing window, second process will exit",
+            );
+            // We're the FIRST (surviving) instance. Bring our main window
+            // forward so the user sees Murmr is already running rather
+            // than wondering why their double-click did nothing.
+            show_main_window(app);
+        }))
         // Manage state at BUILDER time so it's registered before any window
         // exists. Doing this in setup() races with WebView load — IPC calls
         // can fire before setup() returns.
