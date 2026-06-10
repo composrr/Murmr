@@ -12,24 +12,29 @@
 //!   all do the same thing. Works regardless of routing topology.
 //!
 //! State management:
-//!   On `duck()` we save `(process_id → original_volume)` for every session
-//!   we touched. `unduck()` re-enumerates and restores by process_id, so a
-//!   process that opened a NEW audio stream after `duck()` doesn't get
-//!   restored to "1.0" — it keeps whatever it currently has.
+//!   On `duck()` we save `(process_id → MAX original_volume across that
+//!   PID's sessions)`. `unduck()` re-enumerates and restores every visible
+//!   session of each saved PID to that max; PIDs with NO visible session
+//!   get a retry tail at +2s/+10s/+30s (fullscreen games tear down and
+//!   recreate audio sessions on scene transitions, and Windows PERSISTS
+//!   the last-set per-app volume — so giving up at unduck time left games
+//!   permanently quiet until the user fixed the mixer by hand).
 //!
-//!   KNOWN LIMITATION: apps with multiple audio sessions per PID (Chrome
-//!   tabs, Discord channels, OBS scenes) all get restored to the value of
-//!   whichever single session was enumerated last during duck — so the
-//!   restore is "good enough" but not perfectly per-session. v0.1.44 tried
-//!   to key by session_instance_id (PWSTR from GetSessionInstanceIdentifier)
-//!   to fix this, but the PWSTR handling crashed mid-dictation on user
-//!   machines (STATUS_ILLEGAL_INSTRUCTION). v0.1.52 tried a MAX-over-PID
-//!   heuristic but it didn't actually help the Apex Legends case the user
-//!   reported (still under investigation — likely a different cause).
-//!   For now we keep the PID-keyed last-wins restore.
+//!   Why MAX over PID: multi-device routing (Voicemeeter exposes a
+//!   dozen-plus render devices) and multi-bus apps give one process many
+//!   sessions at different volumes; last-wins saved whichever enumerated
+//!   last (often a quiet sub-bus) and restored the loud master DOWN to it.
+//!   Max never under-restores. (First shipped v0.1.52; reverted on a test
+//!   later invalidated by the concurrent AVX-512 crash; re-applied
+//!   v0.1.58 together with the retry tail.)
 //!
-//!   Sessions whose process exited between duck/unduck just disappear from
-//!   the enumeration and are silently dropped.
+//!   v0.1.44 tried true per-session keying via session_instance_id (PWSTR
+//!   from GetSessionInstanceIdentifier) but the PWSTR handling crashed
+//!   mid-dictation (STATUS_ILLEGAL_INSTRUCTION); PID+max needs no unsafe
+//!   string juggling.
+//!
+//!   Sessions whose process exited between duck/unduck drop out of the
+//!   retry tail after the final pass and are logged.
 //!
 //! Crash isolation:
 //!   Both `duck()` and `unduck()` are wrapped in `std::panic::catch_unwind`
@@ -200,13 +205,23 @@ fn duck_inner(amount: f32) {
     for_each_session(|pid, vol| {
         unsafe {
             let current = vol.GetMasterVolume().unwrap_or(1.0);
-            // Insert keyed by PID. For apps with multiple audio sessions
-            // per PID (Chrome tabs, Discord channels, OBS) this means the
-            // last session's volume wins the saved slot, and on unduck
-            // all sessions of that PID restore to that single value.
-            // Imperfect but stable — see the module doc comment for the
-            // history with per-session keying.
-            saved.insert(pid, current);
+            // Save the MAX volume seen across all of a PID's sessions.
+            // Multi-device routing setups (Voicemeeter exposes a dozen-plus
+            // render devices) and multi-bus apps (Apex master + sub-mixes,
+            // Chrome tabs, Discord channels) give one process MANY sessions
+            // at different volumes. A plain insert meant whichever session
+            // enumerated LAST won the saved slot — often a quieter sub-bus
+            // — so unduck restored the app's loud master DOWN to that value
+            // and the user's game audio stayed stuck quiet. Saving the max
+            // means restore never lands below any session's original;
+            // worst case we slightly over-restore a manually-dimmed
+            // sibling session, which beats permanently under-restoring.
+            //
+            // (First shipped in v0.1.52, reverted after a test that — in
+            // hindsight — was invalidated by the concurrent AVX-512 crash.
+            // Re-applied in v0.1.58 with the retry pass below.)
+            let prior = saved.get(&pid).copied().unwrap_or(0.0);
+            saved.insert(pid, current.max(prior));
             let target = (current * factor).clamp(0.0, 1.0);
             // GUID context arg = caller's identifier so the OS can route
             // change-notifications back to us. Passing zero/null is fine
@@ -222,7 +237,8 @@ fn duck_inner(amount: f32) {
     });
 
     perf_log::append(&format!(
-        "[duck] ducked {count} session(s) by {:.0}%",
+        "[duck] ducked {count} session(s) across {} PID(s) by {:.0}%",
+        saved.len(),
         amount * 100.0
     ));
     *SAVED_VOLUMES.lock() = Some(saved);
@@ -252,23 +268,82 @@ fn unduck_inner() {
         }
     };
 
-    let mut restored = 0;
+    let remaining = restore_pass(&saved);
+    perf_log::append(&format!(
+        "[duck] restored {}/{} PID(s) on first pass",
+        saved.len() - remaining.len(),
+        saved.len(),
+    ));
+
+    // Sessions that weren't enumerable right now get a retry tail.
+    // Fullscreen games tear down + recreate audio sessions on scene
+    // transitions / alt-tab (especially with exclusive-mode audio), so
+    // the session we ducked may simply not EXIST at this instant — but
+    // Windows persists the last-set per-app session volume, so if we
+    // give up the app comes back STILL DUCKED and stays that way until
+    // the user fixes it by hand in the volume mixer. Retrying at +2s /
+    // +10s / +30s catches the session when it reappears.
+    if !remaining.is_empty() {
+        perf_log::append(&format!(
+            "[duck] {} PID(s) had no visible session — scheduling restore retries",
+            remaining.len(),
+        ));
+        std::thread::Builder::new()
+            .name("murmr-unduck-retry".into())
+            .spawn(move || {
+                let mut pending = remaining;
+                for delay_s in [2u64, 10, 30] {
+                    std::thread::sleep(std::time::Duration::from_secs(delay_s));
+                    // A new duck started while we were waiting → it took a
+                    // fresh snapshot that supersedes ours; stop retrying so
+                    // we don't fight it.
+                    if SAVED_VOLUMES.lock().is_some() {
+                        perf_log::append(
+                            "[duck] retry abandoned — a new duck cycle started",
+                        );
+                        return;
+                    }
+                    pending = restore_pass(&pending);
+                    if pending.is_empty() {
+                        perf_log::append(&format!(
+                            "[duck] retry at +{delay_s}s restored all remaining session(s)",
+                        ));
+                        return;
+                    }
+                    perf_log::append(&format!(
+                        "[duck] retry at +{delay_s}s: {} PID(s) still not visible",
+                        pending.len(),
+                    ));
+                }
+                perf_log::append(&format!(
+                    "[duck] giving up on {} PID(s) after retries (process likely exited)",
+                    pending.len(),
+                ));
+            })
+            .ok();
+    }
+}
+
+/// One restoration sweep: walk current sessions, restore any whose PID is
+/// in `targets`, and return the subset of `targets` that had NO visible
+/// session this pass (candidates for retry). Restore failures (COM error
+/// on a visible session) are logged but NOT retried — the session was
+/// there, the set just failed, and hammering it won't help.
+fn restore_pass(targets: &HashMap<u32, f32>) -> HashMap<u32, f32> {
+    let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for_each_session(|pid, vol| {
-        if let Some(original) = saved.get(&pid) {
+        if let Some(original) = targets.get(&pid) {
+            seen.insert(pid);
             unsafe {
                 if let Err(e) = vol.SetMasterVolume(*original, std::ptr::null()) {
                     perf_log::append(&format!("[duck] pid={pid} restore failed: {e:?}"));
-                } else {
-                    restored += 1;
                 }
             }
         }
     });
-
-    let missing = saved.len().saturating_sub(restored);
-    perf_log::append(&format!(
-        "[duck] restored {restored}/{} session(s) ({} missing — process/session ended)",
-        saved.len(),
-        missing,
-    ));
+    targets
+        .iter()
+        .filter(|(pid, _)| !seen.contains(pid))
+        .map(|(pid, vol)| (*pid, *vol))
+        .collect()
 }

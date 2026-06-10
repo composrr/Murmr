@@ -16,6 +16,31 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.58 — Game audio actually comes back after dictating
+
+### Fixed
+
+- **Per-app volumes restore correctly on multi-device / multi-bus
+  audio setups** (Voicemeeter, games with master + sub-mix sessions
+  like Apex Legends). When one process has several audio sessions at
+  different volumes, the saved "original" used to be whichever
+  session happened to enumerate last — often a quiet sub-bus — so
+  restoring dragged the loud master down to it. We now save the MAX
+  across each process's sessions, so restore never lands below any
+  session's true original. (This shipped briefly in v0.1.52 and was
+  reverted after a test that turned out to be invalidated by the
+  AVX-512 crash happening at the same time. The crash is fixed, the
+  fix is back.)
+- **Sessions that vanish mid-dictation get restored when they
+  reappear.** Fullscreen games tear down and recreate audio sessions
+  on scene transitions and alt-tabs — if the session we ducked didn't
+  exist at the moment dictation ended, we used to give up, and
+  Windows *persists* that ducked per-app volume, leaving the game
+  quiet until you fixed the mixer by hand. Unduck now retries at
+  +2s / +10s / +30s, catching the session as it comes back.
+
+---
+
 ## v0.1.57 — Only one Murmr at a time
 
 ### Fixed
