@@ -16,6 +16,24 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.59 — Live word counter reads words, not syllables
+
+### Fixed
+
+- **The live word counter in the recording pill no longer runs high.**
+  While recording, Murmr can't know the real word count yet (there's
+  no streaming transcription), so the pill estimates it from how long
+  you've been actively speaking. The assumed rate was 220 WPM —
+  auctioneer-fast — which made the estimate run about 1.4× high. Since
+  English averages ~1.4 syllables per word, that made the count look
+  like it was tallying syllables. The rate is now 150 WPM (a realistic
+  dictation average), so the live estimate tracks actual words much
+  more closely. (The saved word counts in History and Insights were
+  always exact — computed from the real transcript — and are
+  unchanged.)
+
+---
+
 ## v0.1.58 — Game audio actually comes back after dictating
 
 ### Fixed

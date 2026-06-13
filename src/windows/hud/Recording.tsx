@@ -9,9 +9,18 @@ interface Props {
   activeSpeechMs: number;
 }
 
-/// ~220 WPM — fast natural dictation rate (the count is an estimate; v1
-/// has no streaming transcription).
-const WORDS_PER_MS = 220 / 60 / 1000;
+/// Live word-count estimate rate. We can't know the real word count until
+/// transcription finishes (no streaming), so the pill estimates from how
+/// long the user has actively been speaking × an assumed words-per-minute.
+///
+/// 150 WPM is a realistic average dictation rate. The previous 220 WPM was
+/// auctioneer-fast and made the estimate run ~1.4× high — which, because
+/// English averages ~1.4 syllables per word, made the live count read like
+/// it was counting SYLLABLES rather than words. 150 tracks normal speech
+/// much more closely. (The saved/history word count is exact — computed
+/// from the actual transcript — so only this in-progress pill is an
+/// estimate.)
+const WORDS_PER_MS = 150 / 60 / 1000;
 
 export default function Recording({ rms, startedAt, activeSpeechMs }: Props) {
   const [now, setNow] = useState(() => Date.now());
