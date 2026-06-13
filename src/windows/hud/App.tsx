@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
+  getSettings,
   isRecordingActive,
   listenStatus,
   type DictationStatus,
@@ -8,6 +9,22 @@ import {
 import Recording from './Recording';
 import Thinking from './Thinking';
 import ResultPopup from './ResultPopup';
+
+/// Which elements of the recording pill to show. Mirrors the three
+/// `hud_show_*` Settings toggles. Defaults here are the safe "show it"
+/// fallback used until the real settings load — except word count,
+/// which defaults off to match the Settings default (it's an estimate,
+/// more a fun stat than a fact, so off unless the user opts in).
+interface HudDisplay {
+  waveform: boolean;
+  timer: boolean;
+  wordCount: boolean;
+}
+const DEFAULT_HUD_DISPLAY: HudDisplay = {
+  waveform: true,
+  timer: true,
+  wordCount: false,
+};
 
 const WAVEFORM_BARS = 13;
 
@@ -42,6 +59,7 @@ export default function HudApp() {
   const [view, setView] = useState<HudView>({ kind: 'hidden' });
   const [rmsHistory, setRmsHistory] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
   const [activeSpeechMs, setActiveSpeechMs] = useState(0);
+  const [display, setDisplay] = useState<HudDisplay>(DEFAULT_HUD_DISPLAY);
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
   // Speech-tracking state for the word counter (hysteresis).
@@ -148,15 +166,35 @@ export default function HudApp() {
       setView({ kind: 'result', text: event.payload.text });
     };
 
+    // Pull the user's HUD display preferences. Re-pulled on every
+    // hud-shown so toggling "Show word count" / waveform / timer in
+    // Settings takes effect the next time the pill appears (no need
+    // for a live settings-changed broadcast).
+    const refreshDisplay = async () => {
+      try {
+        const s = await getSettings();
+        if (cancelled) return;
+        setDisplay({
+          waveform: s.hud_show_waveform,
+          timer: s.hud_show_timer,
+          wordCount: s.hud_show_word_count,
+        });
+      } catch (e) {
+        console.error('getSettings (HUD display) failed', e);
+      }
+    };
+
     // `murmr:hud-shown` is emitted by the controller after EVERY
     // `show_hud()` call. Listening for it gives us a sharper signal than
     // the timed re-emit fallback: even if `Status::Recording` was lost
     // because the WebView was suspended at emit time, this event will
     // fire as soon as the WebView resumes and processes the queued
-    // message. We re-query state on receipt to land in the right view.
+    // message. We re-query state on receipt to land in the right view,
+    // and re-pull display prefs so toggle changes apply.
     const onHudShown = () => {
       if (cancelled) return;
       void selfHeal();
+      void refreshDisplay();
     };
 
     // Boot sequence: register every listener IN PARALLEL (Promise.all
@@ -188,6 +226,7 @@ export default function HudApp() {
         return;
       }
       await selfHeal();
+      await refreshDisplay();
     };
     void boot();
 
@@ -202,7 +241,14 @@ export default function HudApp() {
   return (
     <div className="hud-stage">
       {view.kind === 'recording' && (
-        <Recording rms={rmsHistory} startedAt={view.startedAt} activeSpeechMs={activeSpeechMs} />
+        <Recording
+          rms={rmsHistory}
+          startedAt={view.startedAt}
+          activeSpeechMs={activeSpeechMs}
+          showWaveform={display.waveform}
+          showTimer={display.timer}
+          showWordCount={display.wordCount}
+        />
       )}
       {view.kind === 'thinking' && <Thinking />}
       {view.kind === 'result' && (

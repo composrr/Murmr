@@ -16,6 +16,28 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.60 — HUD display toggles actually work (word count now optional)
+
+### Fixed
+
+- **The HUD display toggles in Preferences now do something.** "Show
+  waveform," "Show timer," and "Show estimated word count" have
+  existed in Settings for a while but the recording pill ignored
+  them and always rendered all three. They're now wired up — flip
+  any of them and the pill updates the next time it appears.
+
+### Changed
+
+- **The live word count is now off by default.** It's a time-based
+  estimate (no streaming transcription), so it's more of a fun stat
+  than a fact — the recording pill is cleaner as just waveform +
+  timer. Want it back? Settings → Preferences → HUD → "Show
+  estimated word count." Your exact word counts in History and
+  Insights are unchanged. (If you already had it on, it stays on
+  until you turn it off.)
+
+---
+
 ## v0.1.59 — Live word counter reads words, not syllables
 
 ### Fixed

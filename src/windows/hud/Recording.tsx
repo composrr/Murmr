@@ -7,6 +7,12 @@ interface Props {
   startedAt: number;
   /** Cumulative milliseconds in which the user was actually speaking. */
   activeSpeechMs: number;
+  /** Show the live waveform bars (Settings → hud_show_waveform). */
+  showWaveform: boolean;
+  /** Show the elapsed timer (Settings → hud_show_timer). */
+  showTimer: boolean;
+  /** Show the live word-count estimate (Settings → hud_show_word_count). */
+  showWordCount: boolean;
 }
 
 /// Live word-count estimate rate. We can't know the real word count until
@@ -22,7 +28,14 @@ interface Props {
 /// estimate.)
 const WORDS_PER_MS = 150 / 60 / 1000;
 
-export default function Recording({ rms, startedAt, activeSpeechMs }: Props) {
+export default function Recording({
+  rms,
+  startedAt,
+  activeSpeechMs,
+  showWaveform,
+  showTimer,
+  showWordCount,
+}: Props) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -51,44 +64,57 @@ export default function Recording({ rms, startedAt, activeSpeechMs }: Props) {
     >
       <span className="block w-2 h-2 rounded-full" style={{ background: '#e85d4a' }} />
 
-      <div className="flex items-end gap-[2px] h-[18px]">
-        {rms.map((value, i) => {
-          // Map RMS [0..0.4] → bar height [3..18px], opacity [0.5..0.95].
-          // Speech RMS rarely exceeds 0.4 even on loud passages.
-          const norm = Math.min(1, value / 0.4);
-          const height = 3 + norm * 15;
-          const opacity = 0.5 + norm * 0.45;
-          return (
-            <span
-              key={i}
-              style={{
-                display: 'inline-block',
-                width: 2,
-                height,
-                background: '#d4d4cf',
-                borderRadius: 1,
-                opacity,
-                transition: 'height 80ms linear, opacity 80ms linear',
-              }}
-            />
-          );
-        })}
-      </div>
+      {showWaveform && (
+        <div className="flex items-end gap-[2px] h-[18px]">
+          {rms.map((value, i) => {
+            // Map RMS [0..0.4] → bar height [3..18px], opacity [0.5..0.95].
+            // Speech RMS rarely exceeds 0.4 even on loud passages.
+            const norm = Math.min(1, value / 0.4);
+            const height = 3 + norm * 15;
+            const opacity = 0.5 + norm * 0.45;
+            return (
+              <span
+                key={i}
+                style={{
+                  display: 'inline-block',
+                  width: 2,
+                  height,
+                  background: '#d4d4cf',
+                  borderRadius: 1,
+                  opacity,
+                  transition: 'height 80ms linear, opacity 80ms linear',
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
 
-      <span
-        style={{
-          color: '#d4d4cf',
-          fontSize: 13,
-          fontVariantNumeric: 'tabular-nums',
-          fontWeight: 500,
-        }}
-      >
-        {timer}
-      </span>
-      <span style={{ color: 'rgba(212,212,207,0.35)', fontSize: 13 }}>·</span>
-      <span style={{ color: 'rgba(212,212,207,0.7)', fontSize: 13 }}>
-        {words} {words === 1 ? 'word' : 'words'}
-      </span>
+      {showTimer && (
+        <span
+          style={{
+            color: '#d4d4cf',
+            fontSize: 13,
+            fontVariantNumeric: 'tabular-nums',
+            fontWeight: 500,
+          }}
+        >
+          {timer}
+        </span>
+      )}
+
+      {showWordCount && (
+        <>
+          {/* Only show the separator dot when there's a timer before it,
+              so the word count doesn't lead with a stray "·". */}
+          {showTimer && (
+            <span style={{ color: 'rgba(212,212,207,0.35)', fontSize: 13 }}>·</span>
+          )}
+          <span style={{ color: 'rgba(212,212,207,0.7)', fontSize: 13 }}>
+            {words} {words === 1 ? 'word' : 'words'}
+          </span>
+        </>
+      )}
     </div>
   );
 }

@@ -129,7 +129,11 @@ impl Default for Settings {
 
             hud_show_waveform: true,
             hud_show_timer: true,
-            hud_show_word_count: true,
+            // Off by default: the live count is a time-based estimate
+            // (no streaming transcription), more a fun stat than a fact.
+            // Users who want it can flip it on in Preferences; the exact
+            // counts in History/Insights are unaffected.
+            hud_show_word_count: false,
             hud_position: "near-input".into(),
 
             sound_start_click: true,
