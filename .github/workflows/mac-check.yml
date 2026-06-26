@@ -57,6 +57,12 @@ jobs:
       # enough to catch compile/FFI errors — both arches build identical Rust.
       - name: Build Tauri app (compile check, unsigned)
         env:
+          # The updater signing key is needed because tauri.conf.json has
+          # createUpdaterArtifacts: true — without it the bundle step fails
+          # after a successful compile. Not Apple code-signing; just the
+          # minisign updater key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           MACOSX_DEPLOYMENT_TARGET: '13.0'
           CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
           GGML_NATIVE: 'OFF'
@@ -66,3 +72,14 @@ jobs:
           GGML_AVX512_BF16: 'OFF'
         run: npm run tauri build -- --target aarch64-apple-darwin
         shell: bash
+
+      # Upload the .dmg so this branch check doubles as a Mac test build
+      # (Apple Silicon). Still UNSIGNED — installing it needs the
+      # `xattr -cr /Applications/Murmr.app` step until code-signing lands.
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: murmr-macos-aarch64-testbuild
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
