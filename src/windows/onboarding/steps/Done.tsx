@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { PrimaryButton, ProgressDots, type StepProps } from '../App';
-import { getSettings } from '../../../lib/ipc';
+import { PrimaryButton, ProgressDots, SecondaryButton, type StepProps } from '../App';
+import { getSettings, isMac, restartApp } from '../../../lib/ipc';
 import { displayName } from '../../main/pages/HotkeyCapture';
 
 export default function Done({ index, total, finish }: StepProps) {
   const [dictation, setDictation] = useState('ControlRight');
   const [repeat, setRepeat] = useState('');
   const [cancel, setCancel] = useState('Escape');
+  const mac = isMac();
 
   useEffect(() => {
     getSettings()
@@ -17,6 +18,18 @@ export default function Done({ index, total, finish }: StepProps) {
       })
       .catch(() => {});
   }, []);
+
+  // On macOS, Input Monitoring + Accessibility grants only take effect on
+  // restart. Complete onboarding (persists the flag), THEN relaunch so the
+  // hotkey + paste work immediately. On relaunch onboarding is done, so the
+  // user lands straight in the main app with permissions live.
+  const finishAndRestart = async () => {
+    try {
+      await finish();
+    } finally {
+      restartApp().catch(() => {});
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col items-center px-12 pt-2 pb-8 min-h-0 overflow-y-auto">
@@ -60,12 +73,26 @@ export default function Done({ index, total, finish }: StepProps) {
         />
       </div>
 
-      <PrimaryButton onClick={finish}>Open Murmr</PrimaryButton>
-
-      <p className="text-[11px] text-text-quaternary mt-5 text-center max-w-[460px] leading-[1.5]">
-        Murmr lives in your system tray. Closing the main window keeps it running quietly in the
-        background.
-      </p>
+      {mac ? (
+        <>
+          <PrimaryButton onClick={finishAndRestart}>Finish &amp; restart Murmr</PrimaryButton>
+          <p className="text-[11px] text-text-quaternary mt-3 text-center max-w-[460px] leading-[1.5]">
+            Murmr restarts once so the Input Monitoring and Accessibility permissions take effect —
+            then your hotkey and pasting work right away.
+          </p>
+          <div className="mt-3">
+            <SecondaryButton onClick={finish}>Open without restarting</SecondaryButton>
+          </div>
+        </>
+      ) : (
+        <>
+          <PrimaryButton onClick={finish}>Open Murmr</PrimaryButton>
+          <p className="text-[11px] text-text-quaternary mt-5 text-center max-w-[460px] leading-[1.5]">
+            Murmr lives in your system tray. Closing the main window keeps it running quietly in the
+            background.
+          </p>
+        </>
+      )}
 
       <div className="mt-6">
         <ProgressDots index={index} total={total} />

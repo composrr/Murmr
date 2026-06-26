@@ -7,6 +7,7 @@ mod hotkey;
 mod injector;
 mod notifications;
 mod perf_log;
+mod permissions;
 mod settings;
 mod sounds;
 mod transcribe;
@@ -405,6 +406,55 @@ fn open_macos_pref_pane(pane: String, app: AppHandle) -> Result<(), String> {
         // unconditionally without branching.
         Ok(())
     }
+}
+
+// ----- Permission checks (onboarding walkthrough) -----
+
+/// Live status of the three macOS permissions Murmr needs. The onboarding
+/// wizard polls these to show "Waiting… → Granted ✓" and auto-advance.
+/// All return `NotApplicable` on Windows/Linux.
+#[tauri::command]
+fn check_microphone_permission() -> permissions::PermissionState {
+    permissions::microphone_state()
+}
+
+#[tauri::command]
+fn check_accessibility_permission() -> permissions::PermissionState {
+    permissions::accessibility_state()
+}
+
+#[tauri::command]
+fn check_input_monitoring_permission() -> permissions::PermissionState {
+    permissions::input_monitoring_state()
+}
+
+/// Trigger the macOS microphone permission prompt by briefly opening the
+/// input device. On first use macOS shows the "allow microphone" dialog;
+/// the onboarding then polls `check_microphone_permission` until the user
+/// answers. No-op-ish elsewhere (just confirms a device opens). Runs on a
+/// blocking worker so the cpal round-trip doesn't stall the UI thread.
+#[tauri::command]
+async fn request_microphone_permission() -> permissions::PermissionState {
+    let _ = async_runtime::spawn_blocking(|| {
+        // Opening the default input device is what actually triggers the
+        // TCC prompt. We don't care about the captured audio — start, let
+        // the OS surface the dialog, then immediately stop.
+        let recorder = audio::Recorder::new();
+        if recorder.start_with_callbacks(None, None).is_ok() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let _ = recorder.stop();
+        }
+    })
+    .await;
+    permissions::microphone_state()
+}
+
+/// Relaunch Murmr. macOS only applies newly-granted Accessibility / Input
+/// Monitoring permissions to a process on restart, so the onboarding offers
+/// a "Restart Murmr" button after the user enables those.
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
 }
 
 #[tauri::command]
@@ -1046,6 +1096,11 @@ pub fn run() {
             launch_at_login_active,
             open_macos_pref_pane,
             is_recording_active,
+            check_microphone_permission,
+            check_accessibility_permission,
+            check_input_monitoring_permission,
+            request_microphone_permission,
+            restart_app,
             purge_older_transcriptions,
             clear_last_24_hours,
             clear_all_transcriptions,
