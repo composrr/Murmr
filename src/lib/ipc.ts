@@ -325,6 +325,39 @@ export function openMacPrefPane(pane: MacPrefPane): Promise<void> {
   return invoke<void>('open_macos_pref_pane', { pane });
 }
 
+// ----- Permission status (onboarding walkthrough) -----
+
+/// Mirrors the Rust PermissionState enum (serde kebab-case). 'not-applicable'
+/// means the platform doesn't gate this capability (Windows/Linux).
+export type PermissionState =
+  | 'granted'
+  | 'denied'
+  | 'not-determined'
+  | 'restricted'
+  | 'unknown'
+  | 'not-applicable';
+
+export function checkMicrophonePermission(): Promise<PermissionState> {
+  return invoke<PermissionState>('check_microphone_permission');
+}
+export function checkAccessibilityPermission(): Promise<PermissionState> {
+  return invoke<PermissionState>('check_accessibility_permission');
+}
+export function checkInputMonitoringPermission(): Promise<PermissionState> {
+  return invoke<PermissionState>('check_input_monitoring_permission');
+}
+/// Trigger the macOS microphone prompt (briefly opens the input device),
+/// then return the resulting status. Poll checkMicrophonePermission after
+/// to catch the user's answer.
+export function requestMicrophonePermission(): Promise<PermissionState> {
+  return invoke<PermissionState>('request_microphone_permission');
+}
+/// Relaunch Murmr — needed for macOS to apply newly-granted Accessibility
+/// / Input Monitoring permissions.
+export function restartApp(): Promise<void> {
+  return invoke<void>('restart_app');
+}
+
 // ----- Platform detection helper -----
 
 export function isMac(): boolean {

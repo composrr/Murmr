@@ -1,0 +1,85 @@
+name: macOS compile check
+
+# Build-only validation for macOS-specific code (FFI, permission checks, etc).
+# Runs on pushes to compile-check branches and on demand. Does NOT sign,
+# notarize, or release anything — its only job is to prove the macOS build
+# compiles before we tag a real release (a macOS compile error in the
+# release workflow blocks the whole cross-platform release, Windows included,
+# because the publish job needs every platform green).
+
+on:
+  push:
+    branches:
+      - 'mac-check/**'
+      - 'onboarding**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compile:
+    name: Compile macOS (aarch64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: macos-check-aarch64
+
+      - name: Install libomp (macOS)
+        run: brew install libomp
+        shell: bash
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download Whisper model
+        run: |
+          mkdir -p src-tauri/models
+          curl -L -o src-tauri/models/ggml-base.en.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+        shell: bash
+
+      # Mirror the release workflow's build env so this is a faithful compile
+      # (same deployment target + GGML AVX-512 opt-outs). One target is
+      # enough to catch compile/FFI errors — both arches build identical Rust.
+      - name: Build Tauri app (compile check, unsigned)
+        env:
+          # The updater signing key is needed because tauri.conf.json has
+          # createUpdaterArtifacts: true — without it the bundle step fails
+          # after a successful compile. Not Apple code-signing; just the
+          # minisign updater key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MACOSX_DEPLOYMENT_TARGET: '13.0'
+          CMAKE_OSX_DEPLOYMENT_TARGET: '13.0'
+          GGML_NATIVE: 'OFF'
+          GGML_AVX512: 'OFF'
+          GGML_AVX512_VBMI: 'OFF'
+          GGML_AVX512_VNNI: 'OFF'
+          GGML_AVX512_BF16: 'OFF'
+        run: npm run tauri build -- --target aarch64-apple-darwin
+        shell: bash
+
+      # Upload the .dmg so this branch check doubles as a Mac test build
+      # (Apple Silicon). Still UNSIGNED — installing it needs the
+      # `xattr -cr /Applications/Murmr.app` step until code-signing lands.
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: murmr-macos-aarch64-testbuild
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

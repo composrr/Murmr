@@ -4,7 +4,11 @@ import { useTheme } from '../../hooks/useTheme';
 import { completeOnboarding, isMac } from '../../lib/ipc';
 import Welcome from './steps/Welcome';
 import Name from './steps/Name';
-import MacPermissions from './steps/MacPermissions';
+import {
+  MicPermissionStep,
+  InputMonitoringStep,
+  AccessibilityStep,
+} from './steps/MacPermissionSteps';
 import MicTest from './steps/MicTest';
 import Done from './steps/Done';
 
@@ -12,16 +16,21 @@ import Done from './steps/Done';
 // a separate "try it out" step would just be a duplicate. We jump straight
 // to the celebratory Done screen after the test.
 //
-// The Mac permissions step is only shown on macOS — Windows permissions are
-// either silent (mic, after a one-time UAC prompt) or automatic, while Mac
-// requires Input Monitoring + Accessibility grants in System Settings before
-// the hotkey + paste injection actually work. We slot it BEFORE the mic
-// test so users have heard the heads-up about the post-grant restart by the
-// time they hit the test.
+// The three permission steps are macOS-only — Windows permissions are either
+// silent (mic, after a one-time prompt) or automatic, while macOS gates
+// Microphone, Input Monitoring (hotkey), and Accessibility (paste) behind
+// TCC. Each step does LIVE detection: it polls the real grant status and
+// auto-advances when the user grants it. They sit BEFORE the mic test so the
+// mic is granted by the time we record. Input Monitoring + Accessibility are
+// detected live but only take effect on restart — handled at the Done step,
+// which restarts Murmr so the grants apply without bouncing the user back to
+// the Welcome screen mid-wizard.
 const ALL_STEPS = [
   { key: 'welcome', component: Welcome, macOnly: false },
   { key: 'name', component: Name, macOnly: false },
-  { key: 'mac-permissions', component: MacPermissions, macOnly: true },
+  { key: 'mic-permission', component: MicPermissionStep, macOnly: true },
+  { key: 'input-monitoring', component: InputMonitoringStep, macOnly: true },
+  { key: 'accessibility', component: AccessibilityStep, macOnly: true },
   { key: 'mic-test', component: MicTest, macOnly: false },
   { key: 'done', component: Done, macOnly: false },
 ] as const;
