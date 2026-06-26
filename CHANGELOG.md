@@ -16,6 +16,35 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.61 — Guided macOS permission walkthrough (live detection)
+
+### New
+
+- **First-run onboarding on macOS now walks you through each permission
+  with live detection.** Instead of one "here are three permissions,
+  trust us" card, there are now three guided steps — Microphone, Input
+  Monitoring, Accessibility — that poll the real grant status and flip
+  to "Enabled ✓" the moment you allow each one, then auto-advance:
+  - The microphone step fires the actual macOS prompt for you.
+  - Each step has a one-click button into the exact System Settings pane.
+  - Inline "if it's not working…" troubleshooting on every step (mic not
+    heard → check input device / audio router; hotkey dead → Input
+    Monitoring; paste fails → Accessibility).
+  - Input Monitoring + Accessibility only take effect on restart, so the
+    final step is "Finish & restart Murmr" (with an "open without
+    restarting" option) — no more landing in the app with a dead hotkey.
+- Windows onboarding is unchanged (those permissions are automatic).
+
+### Under the hood
+
+- New Rust permission-status checks (`AVCaptureDevice.authorizationStatus`,
+  `AXIsProcessTrusted`, `IOHIDCheckAccess`) exposed to the UI; a
+  build-only macOS CI check (`mac-check.yml`) now validates macOS-specific
+  code on a branch before any release, so a Mac-only compile error can't
+  block a cross-platform release again.
+
+---
+
 ## v0.1.60 — HUD display toggles actually work (word count now optional)
 
 ### Fixed
