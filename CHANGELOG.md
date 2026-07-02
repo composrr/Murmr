@@ -16,6 +16,24 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.62 — Fix Ctrl+V dying in some apps (Photoshop, Ableton)
+
+### Fixed
+
+- **Your own Ctrl+V no longer breaks in certain apps while Murmr is
+  running.** If your re-paste hotkey ended in a letter (e.g.
+  `Ctrl+Shift+V`), Murmr was swallowing the key-*up* for that letter
+  every time you released it — even during an ordinary `Ctrl+V` that
+  had nothing to do with the hotkey. Apps that track key state
+  precisely (Photoshop, Ableton) then thought the key was stuck down
+  and ignored the next paste; right-click paste still worked, and
+  quitting Murmr fixed it. Murmr now only suppresses a key's release
+  when it actually consumed that key's press, so unrelated shortcuts
+  pass through untouched. The same correctness fix applies to the
+  cancel key.
+
+---
+
 ## v0.1.61 — Guided macOS permission walkthrough (live detection)
 
 ### New

@@ -501,6 +501,15 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     let tx_for_cb = tx.clone();
     let first_event_seen = Arc::new(AtomicBool::new(false));
     let first_event_for_cb = first_event_seen.clone();
+    // Keys whose PRESS we suppressed (consumed as a hotkey). We suppress the
+    // matching RELEASE only for these, so key-down/up stay paired for the
+    // focused app. The old code suppressed the release of the repeat/cancel
+    // chord's *main key* with no modifier check — e.g. repeat = Ctrl+Shift+V
+    // meant every `V` key-up got eaten, so a plain Ctrl+V (down passes, up
+    // swallowed) left apps like Photoshop/Ableton seeing V stuck-down and
+    // refusing further pastes. Pairing press↔release fixes that.
+    let suppressed = Arc::new(Mutex::new(std::collections::HashSet::<Key>::new()));
+    let suppressed_for_cb = suppressed.clone();
     // Tracks whether the dictation chord is CURRENTLY fully held. Only
     // meaningful for multi-modifier dictation chords (e.g. Ctrl+Win) —
     // we use it to detect held/released transitions on ANY modifier
@@ -683,6 +692,12 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         }
                     }
                     EventType::KeyRelease(k) => {
+                        // Consume this key from the suppressed-press set (if
+                        // present) up front — its value tells us whether we
+                        // ate the matching press and therefore must eat the
+                        // release too, keeping key-down/up paired.
+                        let press_was_suppressed = suppressed_for_cb.lock().remove(&k);
+
                         // For multi-mod dictation chords: the release event
                         // is "any required modifier no longer held."
                         // dict_chord_just_released captured the transition
@@ -721,25 +736,32 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                 // release closes the recording cleanly).
                                 (Some(HotkeyEvent::DictationUp), true)
                             }
-                        } else if cfg.repeat.as_ref().map(|c| k == c.key).unwrap_or(false) {
-                            // Repeat-key release — suppress for symmetry
-                            // with the press side.
+                        } else if press_was_suppressed {
+                            // We consumed this key's press as a hotkey
+                            // (repeat / cancel-while-recording). Consume its
+                            // release too so the focused app never sees a
+                            // dangling key-up. Crucially this is keyed to
+                            // THIS key's actual suppressed press — so a key
+                            // whose press passed through (e.g. plain Ctrl+V
+                            // when repeat is Ctrl+Shift+V) also has its
+                            // release pass through.
                             (None, true)
-                        } else if k == cfg.cancel.key {
-                            // Mirror the conditional press-side suppression
-                            // — only swallow the release if we swallowed
-                            // the press (i.e. a recording is active).
-                            if is_recording_active() {
-                                (None, true)
-                            } else {
-                                (None, false)
-                            }
                         } else {
                             (None, false)
                         }
                     }
                     _ => (None, false),
                 };
+
+                // Record a suppressed PRESS so its matching release above can
+                // be suppressed too (and only then). Modifiers passed through
+                // for pass-through chords aren't suppressed, so they never
+                // land here.
+                if suppress {
+                    if let EventType::KeyPress(k) = event.event_type {
+                        suppressed_for_cb.lock().insert(k);
+                    }
+                }
 
                 if let Some(ev) = msg {
                     let _ = tx.send(ev);
