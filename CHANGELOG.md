@@ -16,6 +16,35 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.64 — Smart lists
+
+### New
+
+- **Spoken lists format themselves.** When you rattle off a series of things
+  with a natural lead-in — "I need to buy milk, eggs, bread, and cheese" —
+  Murmr now lays it out as a clean list without you having to say "one, two"
+  or "bullet":
+
+  > I need to buy:
+  > - Milk
+  > - Eggs
+  > - Bread
+  > - Cheese
+
+  It keeps your exact words, uses a numbered list when the lead-in is
+  sequential ("the steps are…"), and is conservative — it needs a clear
+  lead-in and three or more short items, so ordinary sentences that happen to
+  contain commas are left alone. On by default; turn it off under
+  Preferences → Post-processing → **Smart lists**.
+
+### Note
+
+- This ships as 0.1.64 (not 0.1.63) purely so the auto-updater offers it — if
+  you'd installed a local 0.1.63 test build, this is the update that also
+  brings you the `[BLANK_AUDIO]` fix and everything else from 0.1.63.
+
+---
+
 ## v0.1.63 — Reliability, control, and a menu-bar Mac
 
 A big release driven by real usage feedback. The theme: never lose a

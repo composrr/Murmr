@@ -73,6 +73,11 @@ pub fn process(
     if settings.auto_bulleted_lists {
         out = apply_bulleted_lists(&out);
     }
+    // Intelligently format unmarked spoken lists ("I need X, Y, and Z") that
+    // the explicit numbered/bulleted passes above didn't catch.
+    if settings.auto_smart_lists {
+        out = apply_natural_lists(&out);
+    }
     // Fuzzy proper-noun correction runs after list formatting and BEFORE
     // literal replacements, snapping near-miss tokens to the intended
     // dictionary "word" spelling (e.g. "Sersha" → "Saoirse").
@@ -592,6 +597,182 @@ fn apply_bulleted_lists(text: &str) -> String {
     }
     out.push_str(&text[cursor..]);
     out
+}
+
+// ---------------------------------------------------------------------------
+// 4d-bis. Natural (unmarked) lists
+// ---------------------------------------------------------------------------
+//
+// Detects an enumerative lead-in immediately followed by a comma/"and" series
+// of ≥3 short items and reformats it as a clean list — WITHOUT the speaker
+// having to say "one/two" or "bullet":
+//
+//   "I need to buy milk, eggs, bread, and cheese"
+//      ↓
+//   "I need to buy:
+//    - Milk
+//    - Eggs
+//    - Bread
+//    - Cheese"
+//
+// Conservative on purpose: it needs a recognizable lead-in cue, ≥3 short
+// parallel items (no sentence punctuation or subordinating conjunctions
+// inside an item), and the series must close the utterance — so ordinary
+// prose that merely contains commas is left untouched.
+
+/// Cues that imply an ORDERED list (→ numbered output).
+const ORDERED_CUES: &[&str] = &[
+    "steps are", "steps", "instructions are", "instructions", "process is",
+    "directions are", "directions", "in order",
+];
+/// Cues that imply an UNORDERED list (→ bulleted output). Each sits directly
+/// before the first item.
+const UNORDERED_CUES: &[&str] = &[
+    "need to", "want to", "have to", "got to", "remember to", "make sure to",
+    "don't forget to", "buy", "get", "grab", "pick up", "purchase", "add",
+    "including", "include", "the following", "namely", "such as",
+    "send me", "send", "give me", "show me", "bring", "email me", "attach",
+    "provide", "cover", "discuss",
+    "are", "is", "am", "were", "was",
+];
+
+fn apply_natural_lists(text: &str) -> String {
+    // Already turned into a list upstream (explicit markers) — leave it.
+    if text.contains("\n- ") || text.contains("\n1. ") {
+        return text.to_string();
+    }
+
+    let mut cues: Vec<(&str, bool)> = Vec::new(); // (cue, ordered)
+    for c in ORDERED_CUES {
+        cues.push((c, true));
+    }
+    for c in UNORDERED_CUES {
+        cues.push((c, false));
+    }
+    // Longest cue first so multi-word cues win in the alternation.
+    cues.sort_by_key(|(c, _)| std::cmp::Reverse(c.len()));
+    let alternation = cues
+        .iter()
+        .map(|(c, _)| regex::escape(c))
+        .collect::<Vec<_>>()
+        .join("|");
+
+    // Greedy prefix so we anchor on the LAST cue before the series.
+    let pat =
+        format!(r"(?is)^(?P<prefix>.+\b(?P<cue>{alternation}))\s*:?\s+(?P<series>.+?)[.!?]?\s*$");
+    let re = match Regex::new(&pat) {
+        Ok(r) => r,
+        Err(_) => return text.to_string(),
+    };
+
+    let trimmed = text.trim();
+    let caps = match re.captures(trimmed) {
+        Some(c) => c,
+        None => return text.to_string(),
+    };
+    let prefix = caps.name("prefix").unwrap().as_str().trim();
+    let cue = caps.name("cue").unwrap().as_str().to_lowercase();
+    let series = caps.name("series").unwrap().as_str().trim();
+
+    let items = split_series(series);
+    if items.len() < 3 {
+        return text.to_string();
+    }
+
+    // Every item must be a short, self-contained phrase — reject if any looks
+    // like a full clause (too long, embedded sentence punctuation, or a
+    // subordinating/coordinating conjunction that signals prose, not a list).
+    const BANNED_SUBSTR: &[&str] = &[
+        " because ", " although ", " however ", " therefore ", " so that ",
+        " which ", " that ", " but ", " nor ", " while ", " since ",
+    ];
+    for it in &items {
+        let wc = it.split_whitespace().count();
+        if wc == 0 || wc > 6 {
+            return text.to_string();
+        }
+        if it.contains(['.', '!', '?', ';', ':']) {
+            return text.to_string();
+        }
+        let padded = format!(" {} ", it.to_lowercase());
+        if BANNED_SUBSTR.iter().any(|b| padded.contains(b)) {
+            return text.to_string();
+        }
+    }
+
+    let ordered = ORDERED_CUES.iter().any(|c| c.eq_ignore_ascii_case(&cue));
+
+    let mut out = String::with_capacity(trimmed.len() + items.len() * 3);
+    out.push_str(prefix);
+    if !prefix.ends_with(':') {
+        out.push(':');
+    }
+    for (i, it) in items.iter().enumerate() {
+        out.push('\n');
+        if ordered {
+            out.push_str(&format!("{}. ", i + 1));
+        } else {
+            out.push_str("- ");
+        }
+        out.push_str(&capitalize_first(it));
+    }
+    out
+}
+
+/// Split a comma/"and"/"or" series into its items, handling both the
+/// oxford-comma form ("a, b, and c") and the non-oxford form ("a, b and c").
+fn split_series(series: &str) -> Vec<String> {
+    let mut parts: Vec<String> = series
+        .split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+
+    // The final comma-part may itself join the last two items with "and"/"or".
+    if let Some(last) = parts.pop() {
+        let low = last.to_lowercase();
+        let cut = low
+            .rfind(" and ")
+            .map(|i| (i, 5usize))
+            .or_else(|| low.rfind(" or ").map(|i| (i, 4usize)));
+        match cut {
+            Some((i, len)) => {
+                let a = last[..i].trim().to_string();
+                let b = last[i + len..].trim().to_string();
+                if !a.is_empty() {
+                    parts.push(a);
+                }
+                if !b.is_empty() {
+                    parts.push(b);
+                }
+            }
+            None => parts.push(last),
+        }
+    }
+
+    // Strip a leading "and "/"or " left on any item (e.g. from ", and cheese").
+    parts
+        .into_iter()
+        .map(|p| {
+            let low = p.to_lowercase();
+            if low.starts_with("and ") {
+                p[4..].trim().to_string()
+            } else if low.starts_with("or ") {
+                p[3..].trim().to_string()
+            } else {
+                p
+            }
+        })
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -188,6 +188,12 @@ export default function Preferences() {
         <Toggle on={settings.smart_spacing} onChange={(v) => update({ smart_spacing: v })} />
       </Row>
       <Row
+        name="Smart lists"
+        hint='Turn a spoken list ("I need milk, eggs, and bread") into a clean bulleted or numbered list automatically — no need to say "one, two" or "bullet".'
+      >
+        <Toggle on={settings.auto_smart_lists} onChange={(v) => update({ auto_smart_lists: v })} />
+      </Row>
+      <Row
         name="Fuzzy-correct names"
         hint="Snap near-miss words to your Dictionary entries"
       >

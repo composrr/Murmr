@@ -263,6 +263,9 @@ export interface Settings {
   voice_command_symbols: boolean;
   /** Insert a separating space between back-to-back dictations. Default true. */
   smart_spacing: boolean;
+  /** Auto-format spoken-but-unmarked lists ("milk, eggs, and bread") into a
+   * clean list. Default true. */
+  auto_smart_lists: boolean;
 
   // ---- Dictionary trust ----
   /** Fuzzy-correct near-miss tokens against enabled "word" entries. Opt-in (default false). */

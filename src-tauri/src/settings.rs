@@ -125,6 +125,13 @@ pub struct Settings {
     /// ("…the manifest.Next I'll…"). On by default.
     #[serde(default = "default_true")]
     pub smart_spacing: bool,
+    /// Intelligently format spoken-but-unmarked lists: an enumerative lead-in
+    /// followed by a comma/"and" series of items ("I need to buy milk, eggs,
+    /// and bread") becomes a clean bulleted (or numbered) list — no need to
+    /// say "one, two" or "bullet". Conservative so ordinary prose is left
+    /// alone. On by default.
+    #[serde(default = "default_true")]
+    pub auto_smart_lists: bool,
 
     // ---- Dictionary trust ----
     /// After transcription, fuzzy-correct near-miss tokens against your
@@ -237,6 +244,7 @@ impl Default for Settings {
             auto_bulleted_lists: true,
             voice_command_symbols: false,
             smart_spacing: true,
+            auto_smart_lists: true,
 
             fuzzy_dictionary: true,
 
