@@ -16,6 +16,74 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.63 — Reliability, control, and a menu-bar Mac
+
+A big release driven by real usage feedback. The theme: never lose a
+dictation, always know what happened, and give you more control over how
+Murmr behaves.
+
+### New
+
+- **Never paste into the wrong window.** Murmr now remembers the window you
+  were in when you started dictating. If you tab away while it's
+  transcribing, it restores that window before pasting — and if it can't,
+  it refuses to paste (so text never lands in the wrong app) and keeps it
+  ready for re-paste.
+- **Edit the last thing you said.** Bind an "Edit last" hotkey
+  (Settings → Hotkeys) to pop your most recent transcript into a little
+  editable bubble — fix a word and hit Insert. No more re-dictating a whole
+  sentence over one mistake.
+- **Per-keystroke injection that actually works.** The Advanced → Injection
+  mode toggle is now wired: "Per-keystroke" types your text out directly
+  instead of pasting, so it works in apps that block programmatic paste
+  (Photoshop, Ableton, some secure fields). Failures are surfaced, not
+  swallowed.
+- **Pick your speech model + an accuracy mode.** Advanced → Speech model is
+  now a real picker — drop a bigger model (e.g. `ggml-small.en.bin`) into
+  the models folder and select it. New "Accurate" mode uses beam search for
+  better results on jargon and accents.
+- **Streamer mode.** One switch (Preferences → Streamer mode) hides the HUD
+  from screen capture (OBS won't see it), suppresses notifications, and can
+  mute Murmr's chimes — so nothing Murmr-related leaks onto a broadcast.
+- **Developer-grade formatting.** Spoken bulleted lists ("bullet … bullet
+  …"), code symbols ("colon", "open paren", "backtick", …), and smart
+  spacing so back-to-back dictations don't run together.
+- **Literal mode.** Type exactly what you said — turn off filler-stripping,
+  self-correction, capitalization, and formatting in one toggle. For when
+  your words must land verbatim.
+
+### Improved
+
+- **We tell you when we didn't catch anything.** Instead of the pill
+  silently vanishing, a brief "Didn't catch that" appears when a recording
+  was too quiet or empty.
+- **Repeating a short phrase works.** Saying "okay" or "yes" twice in a row
+  no longer drops the second one — the duplicate filter is now time-gated,
+  so only an instant echo is discarded.
+- **Long dictations are safer.** Recordings over ~45 seconds transcribe in
+  chunks, so a hiccup late in a long take no longer discards everything
+  before it.
+- **A dictionary you can trust for names.** Near-miss words are now
+  fuzzy-corrected to your saved "word" entries (e.g. a mangled character or
+  brand name is snapped to the spelling you taught it).
+- **Insights "Where you dictate" works.** Murmr now records which app each
+  dictation went into, so the app breakdown actually populates.
+- **Ducking respects your manual changes.** If you adjust an app's volume by
+  hand while Murmr has it ducked, it won't yank it back over your choice
+  when it un-ducks.
+- **Onboarding teaches the hotkey.** Windows users now get the hotkey
+  explanation and a practice step (they existed but weren't shown).
+
+### Fixed
+
+- **macOS: Murmr lives in the menu bar, not the Dock.** It now reliably runs
+  as a menu-bar app with no Dock icon, closing the window hides it to the
+  tray instead of appearing in the Dock.
+- Corrected stale in-app copy that claimed several already-working features
+  ("fires after Phase 7", "not yet wired") weren't live.
+
+---
+
 ## v0.1.62 — Fix Ctrl+V dying in some apps (Photoshop, Ableton)
 
 ### Fixed

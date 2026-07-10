@@ -10,75 +10,41 @@ import Recording from './Recording';
 import Thinking from './Thinking';
 import ResultPopup from './ResultPopup';
 
-/// Which elements of the recording pill to show. Mirrors the three
+/// Which elements of the recording pill to show. Mirrors the two
 /// `hud_show_*` Settings toggles. Defaults here are the safe "show it"
-/// fallback used until the real settings load — except word count,
-/// which defaults off to match the Settings default (it's an estimate,
-/// more a fun stat than a fact, so off unless the user opts in).
+/// fallback used until the real settings load.
 interface HudDisplay {
   waveform: boolean;
   timer: boolean;
-  wordCount: boolean;
 }
 const DEFAULT_HUD_DISPLAY: HudDisplay = {
   waveform: true,
   timer: true,
-  wordCount: false,
 };
 
 const WAVEFORM_BARS = 13;
-
-/// RMS above this counts as "speaking right now." Aligned with the
-/// controller's VAD threshold so the HUD word counter and the actual
-/// transcription gate agree on what's speech vs noise. The previous
-/// value (0.004) sat below typical room noise on many setups (especially
-/// users routing through VoiceMeeter or other virtual mixers), making the
-/// counter tick up at a constant rate even during pauses.
-///
-/// On macOS, built-in MacBook mics record significantly quieter than the
-/// headset/desktop mics 0.015 was tuned for — normal speech often lands
-/// in the 0.001-0.01 range. Use a Mac-specific value so the word counter
-/// responds to typical dictation volume.
-const IS_MAC =
-  typeof navigator !== 'undefined' &&
-  /Mac/i.test(navigator.platform || navigator.userAgent || '');
-const SPEECH_RMS_THRESHOLD = IS_MAC ? 0.001 : 0.015;
-
-/// Once we've started speaking, keep counting until we've seen this many ms
-/// of sustained sub-threshold audio. This makes natural between-word pauses
-/// not stop the counter prematurely.
-const SILENCE_HYSTERESIS_MS = 280;
 
 type HudView =
   | { kind: 'hidden' }
   | { kind: 'recording'; startedAt: number }
   | { kind: 'thinking' }
-  | { kind: 'result'; text: string };
+  | { kind: 'result'; text: string }
+  | { kind: 'edit'; text: string }
+  | { kind: 'no-speech' };
 
 export default function HudApp() {
   const [view, setView] = useState<HudView>({ kind: 'hidden' });
   const [rmsHistory, setRmsHistory] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
-  const [activeSpeechMs, setActiveSpeechMs] = useState(0);
   const [display, setDisplay] = useState<HudDisplay>(DEFAULT_HUD_DISPLAY);
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
-  // Speech-tracking state for the word counter (hysteresis).
-  const isSpeakingRef = useRef(false);
-  const speakingSinceRef = useRef<number | null>(null);
-  const lastAboveThresholdAtRef = useRef<number | null>(null);
-  const accumulatedMsRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const unlisteners: UnlistenFn[] = [];
 
     const resetCounters = () => {
-      isSpeakingRef.current = false;
-      speakingSinceRef.current = null;
-      lastAboveThresholdAtRef.current = null;
-      accumulatedMsRef.current = 0;
       setRmsHistory(Array(WAVEFORM_BARS).fill(0));
-      setActiveSpeechMs(0);
     };
 
     const enterRecordingView = () => {
@@ -112,6 +78,16 @@ export default function HudApp() {
       } else if (status.kind === 'transcribing') {
         setView({ kind: 'thinking' });
         lastSeenStateRef.current = 'transcribing';
+      } else if (status.kind === 'no-speech') {
+        // Briefly tell the user we didn't catch anything, then hide — much
+        // better than the pill just silently vanishing.
+        setView({ kind: 'no-speech' });
+        lastSeenStateRef.current = status.kind;
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setView((v) => (v.kind === 'no-speech' ? { kind: 'hidden' } : v));
+          }
+        }, 1600);
       } else if (status.kind === 'cancelled' || status.kind === 'injected' || status.kind === 'error') {
         setView({ kind: 'hidden' });
         lastSeenStateRef.current = status.kind;
@@ -122,7 +98,6 @@ export default function HudApp() {
 
     const onRms = (event: { payload: number }) => {
       if (cancelled) return;
-      const now = Date.now();
       const rms = event.payload;
 
       // Update the live waveform.
@@ -131,39 +106,18 @@ export default function HudApp() {
         next.push(rms);
         return next;
       });
-
-      // Hysteresis state machine for the word counter.
-      if (rms > SPEECH_RMS_THRESHOLD) {
-        lastAboveThresholdAtRef.current = now;
-        if (!isSpeakingRef.current) {
-          isSpeakingRef.current = true;
-          speakingSinceRef.current = now;
-        }
-      } else if (isSpeakingRef.current && lastAboveThresholdAtRef.current !== null) {
-        const sinceLastSpeech = now - lastAboveThresholdAtRef.current;
-        if (sinceLastSpeech > SILENCE_HYSTERESIS_MS) {
-          // Lock in the speaking burst.
-          const burstMs = lastAboveThresholdAtRef.current - (speakingSinceRef.current ?? now);
-          accumulatedMsRef.current += Math.max(0, burstMs);
-          isSpeakingRef.current = false;
-          speakingSinceRef.current = null;
-        }
-      }
-
-      // Display value uses `lastAboveThresholdAt` (NOT `now`) so it matches
-      // exactly what gets locked in. Result: monotonic — never counts down.
-      const inflight =
-        isSpeakingRef.current
-        && speakingSinceRef.current !== null
-        && lastAboveThresholdAtRef.current !== null
-          ? Math.max(0, lastAboveThresholdAtRef.current - speakingSinceRef.current)
-          : 0;
-      setActiveSpeechMs(accumulatedMsRef.current + inflight);
     };
 
     const onDebugResult = (event: { payload: { text: string } }) => {
       if (cancelled) return;
       setView({ kind: 'result', text: event.payload.text });
+    };
+
+    // Edit-last hotkey: the controller sends the most recent transcript so
+    // the user can tweak a word and re-inject it.
+    const onEditLast = (event: { payload: string }) => {
+      if (cancelled) return;
+      setView({ kind: 'edit', text: event.payload });
     };
 
     // Pull the user's HUD display preferences. Re-pulled on every
@@ -177,7 +131,6 @@ export default function HudApp() {
         setDisplay({
           waveform: s.hud_show_waveform,
           timer: s.hud_show_timer,
-          wordCount: s.hud_show_word_count,
         });
       } catch (e) {
         console.error('getSettings (HUD display) failed', e);
@@ -210,6 +163,7 @@ export default function HudApp() {
           listenStatus(onStatus),
           listen<number>('murmr:audio-rms', onRms),
           listen<{ text: string }>('murmr:hud-debug-result', onDebugResult),
+          listen<string>('murmr:edit-last', onEditLast),
           listen('murmr:hud-shown', onHudShown),
         ]);
         if (cancelled) {
@@ -244,16 +198,40 @@ export default function HudApp() {
         <Recording
           rms={rmsHistory}
           startedAt={view.startedAt}
-          activeSpeechMs={activeSpeechMs}
           showWaveform={display.waveform}
           showTimer={display.timer}
-          showWordCount={display.wordCount}
         />
       )}
       {view.kind === 'thinking' && <Thinking />}
       {view.kind === 'result' && (
         <ResultPopup text={view.text} onDismiss={() => setView({ kind: 'hidden' })} />
       )}
+      {view.kind === 'edit' && (
+        <ResultPopup
+          text={view.text}
+          editable
+          onDismiss={() => setView({ kind: 'hidden' })}
+        />
+      )}
+      {view.kind === 'no-speech' && <NoSpeech />}
+    </div>
+  );
+}
+
+/// Tiny transient pill shown when a recording contained no usable speech.
+function NoSpeech() {
+  return (
+    <div
+      className="flex items-center gap-[10px] rounded-full"
+      style={{
+        background: 'var(--hud-bg, #1f1f1c)',
+        padding: '11px 22px',
+        border: '0.5px solid rgba(255,255,255,0.06)',
+        boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
+      }}
+    >
+      <span className="block w-2 h-2 rounded-full" style={{ background: '#c8a24a' }} />
+      <span style={{ color: 'rgba(212,212,207,0.85)', fontSize: 13 }}>Didn't catch that</span>
     </div>
   );
 }

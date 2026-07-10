@@ -55,6 +55,12 @@ pub struct SoundPlayer {
     sounds_dir: Option<PathBuf>,
 }
 
+/// True when streamer mode is on AND the user opted to mute Murmr's chimes,
+/// so they don't play over captured/broadcast audio.
+fn streamer_muted(s: &crate::settings::Settings) -> bool {
+    s.streamer_mode && s.streamer_mode_mute_chimes
+}
+
 impl SoundPlayer {
     pub fn new(settings: Arc<SettingsStore>, app: &AppHandle) -> Arc<Self> {
         // Pre-resolve the custom-sounds directory; create it lazily on first
@@ -68,7 +74,7 @@ impl SoundPlayer {
 
     pub fn play_start_click(&self) {
         let s = self.settings.get();
-        if !s.sound_start_click {
+        if streamer_muted(&s) || !s.sound_start_click {
             return;
         }
         let volume = s.sound_volume.max(0.0);
@@ -87,7 +93,7 @@ impl SoundPlayer {
     /// directly tied to the user's action.
     pub fn play_complete_chime(&self) {
         let s = self.settings.get();
-        if !s.sound_complete_chime {
+        if streamer_muted(&s) || !s.sound_complete_chime {
             return;
         }
         let volume = s.sound_volume.max(0.0);
@@ -102,7 +108,7 @@ impl SoundPlayer {
 
     pub fn play_error_beep(&self) {
         let s = self.settings.get();
-        if !s.sound_error_beep {
+        if streamer_muted(&s) || !s.sound_error_beep {
             return;
         }
         let volume = s.sound_volume.max(0.0);

@@ -72,9 +72,6 @@ export default function Preferences() {
       <Row name="Show timer" hint="Tabular elapsed-seconds counter">
         <Toggle on={settings.hud_show_timer} onChange={(v) => update({ hud_show_timer: v })} />
       </Row>
-      <Row name="Show estimated word count" hint="Steps up while you're actually speaking">
-        <Toggle on={settings.hud_show_word_count} onChange={(v) => update({ hud_show_word_count: v })} />
-      </Row>
       <Row name="Position" hint="Where the HUD bubble appears on screen">
         <NativeSelect
           value={settings.hud_position}
@@ -169,6 +166,33 @@ export default function Preferences() {
           onChange={(v) => update({ auto_numbered_lists: v })}
         />
       </Row>
+      <Row
+        name="Literal mode"
+        hint="Type exactly what I said — skip filler-strip, auto-correct, capitalization, and formatting"
+      >
+        <Toggle on={settings.literal_mode} onChange={(v) => update({ literal_mode: v })} />
+      </Row>
+      <Row
+        name="Auto bulleted lists"
+        hint='Say "bullet … bullet …" to format an unordered list'
+      >
+        <Toggle
+          on={settings.auto_bulleted_lists}
+          onChange={(v) => update({ auto_bulleted_lists: v })}
+        />
+      </Row>
+      <Row
+        name="Smart spacing"
+        hint="Add a space between back-to-back dictations so they don't run together"
+      >
+        <Toggle on={settings.smart_spacing} onChange={(v) => update({ smart_spacing: v })} />
+      </Row>
+      <Row
+        name="Fuzzy-correct names"
+        hint="Snap near-miss words to your Dictionary entries"
+      >
+        <Toggle on={settings.fuzzy_dictionary} onChange={(v) => update({ fuzzy_dictionary: v })} />
+      </Row>
 
       <SectionHeader>Voice commands</SectionHeader>
       <Row name='"period" → .' hint="Spoken at end of utterance becomes punctuation">
@@ -207,6 +231,15 @@ export default function Preferences() {
           onChange={(v) => update({ voice_command_new_paragraph: v })}
         />
       </Row>
+      <Row
+        name="Code symbols"
+        hint='"colon", "open paren", "backtick", etc. become literal symbols'
+      >
+        <Toggle
+          on={settings.voice_command_symbols}
+          onChange={(v) => update({ voice_command_symbols: v })}
+        />
+      </Row>
 
       <Row name="Filler word list" hint="Edit the words Murmr quietly removes">
         <Segmented
@@ -214,6 +247,23 @@ export default function Preferences() {
           options={[{ value: 'default', label: `${settings.filler_words.length} words` }]}
           onChange={() => {}}
           disabled
+        />
+      </Row>
+
+      <SectionHeader>Streamer mode</SectionHeader>
+      <Row
+        name="Streamer mode"
+        hint="Hide the HUD from screen capture and suppress notifications so nothing Murmr-related shows on a broadcast"
+      >
+        <Toggle on={settings.streamer_mode} onChange={(v) => update({ streamer_mode: v })} />
+      </Row>
+      <Row
+        name="Mute chimes while streaming"
+        hint="Also silence Murmr's start/stop/error sounds while streamer mode is on"
+      >
+        <Toggle
+          on={settings.streamer_mode_mute_chimes}
+          onChange={(v) => update({ streamer_mode_mute_chimes: v })}
         />
       </Row>
 
@@ -225,7 +275,7 @@ export default function Preferences() {
           options={RETENTION_OPTIONS}
         />
       </Row>
-      <Row name="Export all to file" hint="Exports as plain .txt; coming in Phase 10">
+      <Row name="Export all to file" hint="Export your full history as a plain .txt file (coming soon)">
         <SecondaryButton disabled>Export</SecondaryButton>
       </Row>
       <Row name="Clear last 24 hours" hint="Drops everything you've dictated since this time yesterday">
@@ -256,10 +306,9 @@ export default function Preferences() {
       </Row>
 
       <p className="text-[11px] text-text-quaternary mt-6">
-        <Pill>Heads up</Pill>{' '}
-        Toggles persist immediately — but post-processing, sound, retention, and HUD-toggle
-        wiring lands in Phases 7–9. The settings file ({' '}
-        <code className="bg-bg-control px-1 rounded">settings.json</code>) is already on disk.
+        <Pill>Note</Pill>{' '}
+        Every toggle here takes effect immediately and is written to{' '}
+        <code className="bg-bg-control px-1 rounded">settings.json</code> in your app-data folder.
       </p>
     </div>
   );

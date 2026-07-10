@@ -156,6 +156,8 @@ pub struct HotkeyConfig {
     pub dictation: Chord,
     /// `None` disables the re-paste shortcut entirely.
     pub repeat: Option<Chord>,
+    /// `None` disables the edit-last shortcut entirely.
+    pub edit_last: Option<Chord>,
     pub cancel: Chord,
 }
 
@@ -167,6 +169,7 @@ impl Default for HotkeyConfig {
                 key: Key::ControlRight,
             },
             repeat: None,
+            edit_last: None,
             cancel: Chord {
                 modifiers: ModifierSet::default(),
                 key: Key::Escape,
@@ -186,6 +189,8 @@ pub enum HotkeyEvent {
     DictationUp,
     EscDown,
     RepeatLast,
+    /// Pop the last transcript into an editable HUD bubble.
+    EditLast,
 }
 
 // ---------------------------------------------------------------------------
@@ -228,11 +233,17 @@ pub fn parse_chord(s: &str) -> Option<Chord> {
 
 /// Build a `HotkeyConfig` from raw setting strings, falling back to the
 /// defaults for any field that doesn't parse. Empty `repeat` = disabled.
-pub fn config_from_strings(dictation: &str, repeat: &str, cancel: &str) -> HotkeyConfig {
+pub fn config_from_strings(
+    dictation: &str,
+    repeat: &str,
+    edit_last: &str,
+    cancel: &str,
+) -> HotkeyConfig {
     let defaults = HotkeyConfig::default();
     HotkeyConfig {
         dictation: parse_chord(dictation).unwrap_or(defaults.dictation),
         repeat: parse_chord(repeat),
+        edit_last: parse_chord(edit_last),
         cancel: parse_chord(cancel).unwrap_or(defaults.cancel),
     }
 }
@@ -676,6 +687,13 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                             .unwrap_or(false)
                         {
                             (Some(HotkeyEvent::RepeatLast), true)
+                        } else if cfg
+                            .edit_last
+                            .as_ref()
+                            .map(|c| matches_chord(c, k))
+                            .unwrap_or(false)
+                        {
+                            (Some(HotkeyEvent::EditLast), true)
                         } else if matches_chord(&cfg.cancel, k) {
                             // Cancel key (default Escape) — only suppress
                             // and fire EscDown when there's an actual

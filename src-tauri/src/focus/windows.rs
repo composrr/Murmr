@@ -16,13 +16,77 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
-use windows_sys::Win32::Foundation::{POINT, RECT};
+use windows_sys::Win32::Foundation::{CloseHandle, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+use windows_sys::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId, GUITHREADINFO,
+    GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId,
+    SetForegroundWindow, GUITHREADINFO,
 };
 
 use super::ScreenRect;
+
+// ---------------------------------------------------------------------------
+// Foreground app / window identity — used to (a) keep injection targeted at
+// the window the user started dictating in, and (b) label the Insights
+// "where you dictate" breakdown.
+// ---------------------------------------------------------------------------
+
+/// Base name of the foreground window's executable (e.g. "Code.exe").
+pub fn foreground_app() -> Option<String> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 260];
+        let mut size = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut size);
+        CloseHandle(handle);
+        if ok == 0 || size == 0 {
+            return None;
+        }
+        let full = String::from_utf16_lossy(&buf[..size as usize]);
+        let base = full.rsplit(['\\', '/']).next().unwrap_or(&full);
+        if base.is_empty() {
+            None
+        } else {
+            Some(base.to_string())
+        }
+    }
+}
+
+/// Opaque id (the HWND as an integer, so it's `Send`) of the foreground
+/// window. Compared later to detect whether focus moved during transcription.
+pub fn foreground_window_id() -> Option<isize> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            None
+        } else {
+            Some(hwnd as isize)
+        }
+    }
+}
+
+/// Best-effort restore of foreground focus to a window captured earlier.
+/// Returns true if the OS accepted the request (subject to Windows'
+/// foreground-lock rules — not guaranteed to actually foreground it).
+pub fn refocus_window(id: isize) -> bool {
+    unsafe { SetForegroundWindow(id as _) != 0 }
+}
 
 // ---------------------------------------------------------------------------
 // UI Automation (preferred — covers virtually every modern app)

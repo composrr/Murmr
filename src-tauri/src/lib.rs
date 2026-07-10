@@ -133,7 +133,7 @@ async fn record_and_transcribe(
         let elapsed_resample_ms = res_start.elapsed().as_millis();
 
         let tr_start = Instant::now();
-        let text = transcriber.transcribe(&samples_16k, None)?;
+        let text = transcriber.transcribe(&samples_16k, None, false)?;
         let elapsed_transcribe_ms = tr_start.elapsed().as_millis();
 
         Ok(TranscriptionResult {
@@ -183,12 +183,49 @@ fn delete_transcription(id: i64, state: State<'_, AppState>) -> Result<(), Strin
 }
 
 #[tauri::command]
-async fn reinsert_text(text: String) -> Result<(), String> {
+async fn reinsert_text(text: String, state: State<'_, AppState>) -> Result<(), String> {
+    // Honor the user's injection-mode choice (clipboard vs per-keystroke).
+    let keystroke = state.settings.get().injection_mode == "keystroke";
     // Run on a worker thread so the IPC reply doesn't block the UI while
     // we wait on the OS clipboard / SendInput round-trip.
-    async_runtime::spawn_blocking(move || crate::injector::inject_text(&text))
+    async_runtime::spawn_blocking(move || crate::injector::inject_text(&text, keystroke))
         .await
         .map_err(|e| format!("background task panicked: {e}"))?
+}
+
+/// Insert edited text from the edit-last bubble. The HUD was focused so the
+/// user could type; here we hide it, restore focus to the app they were in
+/// when they hit the edit hotkey, then inject.
+#[tauri::command]
+async fn insert_edited(
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let keystroke = state.settings.get().injection_mode == "keystroke";
+    let target = crate::controller::take_edit_target();
+    if let Some(hud) = app.get_webview_window("hud") {
+        let _ = hud.hide();
+    }
+    async_runtime::spawn_blocking(move || {
+        if let Some(id) = target {
+            crate::focus::refocus_window(id);
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        crate::injector::inject_text(&text, keystroke)
+    })
+    .await
+    .map_err(|e| format!("background task panicked: {e}"))?
+}
+
+/// Hide the HUD window — used when the user cancels the edit-last bubble so
+/// the (temporarily focusable) HUD releases focus.
+#[tauri::command]
+fn hide_hud_window(app: AppHandle) {
+    if let Some(hud) = app.get_webview_window("hud") {
+        let _ = hud.hide();
+    }
+    crate::controller::take_edit_target();
 }
 
 #[tauri::command]
@@ -288,6 +325,7 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
     let new_hotkeys = hotkey::config_from_strings(
         &new_settings.dictation_hotkey,
         &new_settings.repeat_hotkey,
+        &new_settings.edit_last_hotkey,
         &new_settings.cancel_hotkey,
     );
     hotkey::update_config(new_hotkeys);
@@ -499,7 +537,9 @@ fn app_paths(app: AppHandle, state: State<'_, AppState>) -> Result<AppPaths, Str
     Ok(AppPaths {
         db_path: data_dir.join("murmr.db").to_string_lossy().to_string(),
         settings_path: state.settings.data_path().to_string_lossy().to_string(),
-        model_path: resolve_model_path().to_string_lossy().to_string(),
+        model_path: resolve_model_path(&state.settings.get().model_name)
+            .to_string_lossy()
+            .to_string(),
         log_path: None,
     })
 }
@@ -753,8 +793,16 @@ fn resolve_app_data_dir() -> PathBuf {
 ///   - macOS bundle:  `<exe_dir>/../Resources/models/...`
 ///
 /// Dev fallback: `<CARGO_MANIFEST_DIR>/models/ggml-base.en.bin`.
-fn resolve_model_path() -> PathBuf {
-    let model_rel = "models/ggml-base.en.bin";
+fn resolve_model_path(model_name: &str) -> PathBuf {
+    // Sanitize to a bare filename ending in .bin so a settings value can never
+    // escape the models directory; fall back to the bundled base model.
+    let safe = std::path::Path::new(model_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| s.ends_with(".bin"))
+        .unwrap_or("ggml-base.en.bin");
+    let model_rel_string = format!("models/{safe}");
+    let model_rel: &str = &model_rel_string;
     let mut attempts: Vec<PathBuf> = Vec::new();
 
     let exe = std::env::current_exe().ok();
@@ -816,6 +864,54 @@ fn resolve_model_path() -> PathBuf {
         attempts
     ));
     dev_path
+}
+
+/// Directory where Whisper model `.bin` files live (the folder containing the
+/// bundled base model). Used to enumerate models the user can select and to
+/// let them drop in a larger one (e.g. `ggml-small.en.bin`).
+fn models_dir() -> Option<PathBuf> {
+    resolve_model_path("ggml-base.en.bin")
+        .parent()
+        .map(|p| p.to_path_buf())
+}
+
+/// List the Whisper models available to select — every `ggml-*.bin` in the
+/// models directory. Powers the model picker in Advanced settings.
+#[tauri::command]
+fn list_models() -> Vec<String> {
+    let Some(dir) = models_dir() else {
+        return vec!["ggml-base.en.bin".into()];
+    };
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.starts_with("ggml-") && n.ends_with(".bin"))
+                .collect()
+        })
+        .unwrap_or_default();
+    if names.is_empty() {
+        names.push("ggml-base.en.bin".into());
+    }
+    names.sort();
+    names
+}
+
+/// Load the Transcriber for the user's selected model, falling back to the
+/// bundled base model if the selection can't be loaded (missing file, etc).
+fn load_transcriber(model_name: &str) -> Result<Transcriber, String> {
+    let path = resolve_model_path(model_name);
+    match Transcriber::new(&path.to_string_lossy()) {
+        Ok(t) => Ok(t),
+        Err(e) if model_name != "ggml-base.en.bin" => {
+            perf_log::append(&format!(
+                "[model] selected model '{model_name}' failed to load ({e}); falling back to base.en"
+            ));
+            let base = resolve_model_path("ggml-base.en.bin");
+            Transcriber::new(&base.to_string_lossy())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 // ---------- Entry point ----------
@@ -922,18 +1018,15 @@ pub fn run() {
     let db = Db::open(&app_data_dir).expect("failed to open Murmr database");
     let settings = SettingsStore::open(&app_data_dir).expect("failed to open Murmr settings store");
 
-    // Load the Whisper model (~2-5 s).
-    let model_path = resolve_model_path();
-    let model_path_str = model_path
-        .to_str()
-        .expect("model path must be UTF-8")
-        .to_string();
-    perf_log::append(&format!("[startup] loading Whisper model from {model_path_str}"));
-    println!("[murmr] loading Whisper model from {model_path_str}");
+    // Load the Whisper model (~2-5 s). Uses the user's selected model, with an
+    // automatic fallback to the bundled base model if the selection can't load.
+    let selected_model = settings.get().model_name;
+    perf_log::append(&format!("[startup] loading Whisper model '{selected_model}'"));
+    println!("[murmr] loading Whisper model '{selected_model}'");
     let transcriber = std::sync::Arc::new(
-        Transcriber::new(&model_path_str).unwrap_or_else(|e| {
+        load_transcriber(&selected_model).unwrap_or_else(|e| {
             panic!(
-                "failed to load Whisper model at {model_path_str}: {e}\n\
+                "failed to load Whisper model '{selected_model}': {e}\n\
                  If running from source, did you run\n\
                  `curl -L -o src-tauri/models/ggml-base.en.bin \
                  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`?"
@@ -998,6 +1091,19 @@ pub fn run() {
             // AppState is already managed via Builder::manage() above.
             // Anything in this setup() block runs concurrent with WebView
             // load — keep stuff that the React app needs out of here.
+
+            // macOS: run as a menu-bar "accessory" app — no Dock icon, no
+            // app-switcher entry, lives entirely in the top menu bar (tray)
+            // and its windows. We set this at runtime (not just via
+            // Info.plist's LSUIElement) because the implicit plist merge into
+            // the built bundle isn't guaranteed, whereas this call always
+            // takes effect. Windows have their own taskbar behavior and are
+            // unaffected.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             build_tray(app.handle())?;
 
             // Wire global hotkey → controller → recording loop. Bindings come
@@ -1010,6 +1116,7 @@ pub fn run() {
                 hotkey::config_from_strings(
                     &s.dictation_hotkey,
                     &s.repeat_hotkey,
+                    &s.edit_last_hotkey,
                     &s.cancel_hotkey,
                 )
             };
@@ -1104,6 +1211,9 @@ pub fn run() {
             purge_older_transcriptions,
             clear_last_24_hours,
             clear_all_transcriptions,
+            list_models,
+            insert_edited,
+            hide_hud_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -44,7 +44,6 @@ pub struct Settings {
 
     pub hud_show_waveform: bool,
     pub hud_show_timer: bool,
-    pub hud_show_word_count: bool,
     pub hud_position: String,
 
     pub sound_start_click: bool,
@@ -103,10 +102,78 @@ pub struct Settings {
     /// resumes normal behavior instantly. Default ON.
     #[serde(default = "default_true")]
     pub pause_during_fullscreen: bool,
+
+    // ---- Developer-grade formatting ----
+    /// Master "type exactly what I said" switch. When true, the whole
+    /// post-processing pipeline (self-corrections, filler-strip, voice
+    /// commands, capitalization, lists, dictionary) is bypassed and the
+    /// raw transcript is injected verbatim. Off by default.
+    #[serde(default)]
+    pub literal_mode: bool,
+    /// Detect spoken bulleted lists ("bullet … bullet …") and format them as
+    /// a real "- " list, mirroring numbered lists.
+    #[serde(default = "default_true")]
+    pub auto_bulleted_lists: bool,
+    /// Recognize spoken code/prose symbols as literal punctuation:
+    /// "colon" → :, "semicolon" → ;, "open/close paren" → ( ), "backtick"
+    /// → `, "hyphen" → -. Off by default because these words appear in
+    /// normal speech; developers opt in.
+    #[serde(default)]
+    pub voice_command_symbols: bool,
+    /// Insert a separating space (or newline) between back-to-back
+    /// dictations so consecutive bursts don't butt together
+    /// ("…the manifest.Next I'll…"). On by default.
+    #[serde(default = "default_true")]
+    pub smart_spacing: bool,
+
+    // ---- Dictionary trust ----
+    /// After transcription, fuzzy-correct near-miss tokens against your
+    /// enabled "word" dictionary entries (proper nouns / brands) so a name
+    /// the model almost got is snapped to the intended spelling. OFF by
+    /// default: because it rewrites any close token, it can occasionally
+    /// catch a real word that happens to resemble one of your entries — so
+    /// it's opt-in for people who add names and want them auto-fixed.
+    #[serde(default)]
+    pub fuzzy_dictionary: bool,
+
+    // ---- Model / accuracy ----
+    /// Filename of the Whisper model to load, resolved inside the app's
+    /// models directory (e.g. "ggml-base.en.bin", "ggml-small.en.bin").
+    /// Lets users drop in a larger model and select it without a rebuild.
+    #[serde(default = "default_model_name")]
+    pub model_name: String,
+    /// Trade speed for accuracy: use beam-search decoding instead of the
+    /// fast greedy path. Noticeably better on jargon/accents, a bit slower.
+    /// Off by default.
+    #[serde(default)]
+    pub accuracy_mode: bool,
+
+    // ---- Streamer mode ----
+    /// When true: hide the HUD from screen capture (OBS etc.) and suppress
+    /// milestone/desktop notifications so nothing Murmr-related leaks onto
+    /// a broadcast. Off by default.
+    #[serde(default)]
+    pub streamer_mode: bool,
+    /// While streamer mode is on, also mute Murmr's own start/stop/error
+    /// chimes (so they don't play over captured audio). Off by default.
+    #[serde(default)]
+    pub streamer_mode_mute_chimes: bool,
+
+    // ---- Edit-last ----
+    /// Standalone hotkey that pops the most recent transcript into an
+    /// editable HUD bubble so a single mis-heard word can be fixed and
+    /// re-injected. Empty string disables it. Same name format as
+    /// `dictation_hotkey`.
+    #[serde(default)]
+    pub edit_last_hotkey: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_model_name() -> String {
+    "ggml-base.en.bin".into()
 }
 
 impl Default for Settings {
@@ -129,11 +196,6 @@ impl Default for Settings {
 
             hud_show_waveform: true,
             hud_show_timer: true,
-            // Off by default: the live count is a time-based estimate
-            // (no streaming transcription), more a fun stat than a fact.
-            // Users who want it can flip it on in Preferences; the exact
-            // counts in History/Insights are unaffected.
-            hud_show_word_count: false,
             hud_position: "near-input".into(),
 
             sound_start_click: true,
@@ -170,6 +232,21 @@ impl Default for Settings {
             display_name: String::new(),
             milestone_notifications: true,
             pause_during_fullscreen: true,
+
+            literal_mode: false,
+            auto_bulleted_lists: true,
+            voice_command_symbols: false,
+            smart_spacing: true,
+
+            fuzzy_dictionary: true,
+
+            model_name: default_model_name(),
+            accuracy_mode: false,
+
+            streamer_mode: false,
+            streamer_mode_mute_chimes: false,
+
+            edit_last_hotkey: String::new(),
         }
     }
 }

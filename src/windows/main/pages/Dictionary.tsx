@@ -75,7 +75,7 @@ export default function Dictionary() {
       <p className="text-[13px] text-text-quaternary mb-[22px] leading-[1.6]">
         Teach Murmr the words, names, and shortcuts you use most.{' '}
         <span className="text-text-tertiary">
-          (Replacements + snippets fire after Phase 7's post-processing pipeline lands.)
+          Words bias recognition; replacements and snippets are applied to every transcript.
         </span>
       </p>
 

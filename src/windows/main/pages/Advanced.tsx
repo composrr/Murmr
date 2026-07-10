@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   appPaths,
   getSettings,
+  listModels,
   openAppDataFolder,
   openPerfLog,
   resetOnboarding,
@@ -30,10 +31,12 @@ const LOG_LEVELS = [
 export default function Advanced() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [paths, setPaths] = useState<AppPaths | null>(null);
+  const [models, setModels] = useState<string[]>([]);
 
   useEffect(() => {
     getSettings().then(setSettings).catch(() => {});
     appPaths().then(setPaths).catch(() => {});
+    listModels().then(setModels).catch(() => {});
   }, []);
 
   const update = (patch: Partial<Settings>) => {
@@ -60,10 +63,28 @@ export default function Advanced() {
       />
 
       <SectionHeader>Speech model</SectionHeader>
-      <Row name="Model file">
-        <span className="text-[12px] text-text-tertiary tabular-nums max-w-[420px] block text-right truncate">
-          {paths.model_path}
-        </span>
+      <Row name="Model file" hint="A model change applies after you restart Murmr.">
+        <NativeSelect
+          value={settings.model_name}
+          onChange={(v) => update({ model_name: String(v) })}
+          options={(models.includes(settings.model_name)
+            ? models
+            : [settings.model_name, ...models]
+          ).map((name) => ({ value: name, label: name }))}
+        />
+      </Row>
+      <Row
+        name="Accuracy"
+        hint="Accurate uses beam search — better on jargon/accents, a little slower."
+      >
+        <Segmented
+          value={settings.accuracy_mode ? 'accurate' : 'fast'}
+          onChange={(v) => update({ accuracy_mode: v === 'accurate' })}
+          options={[
+            { value: 'fast', label: 'Fast' },
+            { value: 'accurate', label: 'Accurate' },
+          ]}
+        />
       </Row>
       <Row name="Compute backend">
         <span className="text-[12px] text-text-primary font-medium">CPU</span>
@@ -136,8 +157,7 @@ export default function Advanced() {
 
       <p className="text-[11px] text-text-quaternary mt-6">
         <Pill kind="info">Note</Pill>{' '}
-        Path display + open-folder buttons are live. The injection-mode toggle, log-level
-        selector, and reset are persisted but not yet wired to the backend.
+        The injection mode and model picker are live. Reset-to-defaults is still coming.
       </p>
     </div>
   );

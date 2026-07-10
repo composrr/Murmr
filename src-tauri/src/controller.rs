@@ -33,6 +33,20 @@ fn current_recording_session() -> u64 {
     RECORDING_SESSION.load(Ordering::Relaxed)
 }
 
+/// The window the user was in when they pressed the edit-last hotkey — the
+/// app the edited text should be re-injected into once they hit Insert.
+/// Stashed here (rather than threaded through state) so the `insert_edited`
+/// command can read it after the HUD has taken focus for editing.
+static EDIT_TARGET: Mutex<Option<isize>> = Mutex::new(None);
+
+pub fn set_edit_target(id: Option<isize>) {
+    *EDIT_TARGET.lock() = id;
+}
+
+pub fn take_edit_target() -> Option<isize> {
+    EDIT_TARGET.lock().take()
+}
+
 use crossbeam_channel::Receiver;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -93,6 +107,36 @@ const VAD_MIN_SPEECH_CHUNKS: usize = 3;
 /// enough that a stuck state self-recovers within one cup of coffee.
 const MAX_RECORDING_DURATION: Duration = Duration::from_secs(10 * 60);
 
+/// How recently an identical transcript must have been injected for us to
+/// treat a repeat as a Whisper echo rather than the user genuinely saying
+/// the same short phrase again. Beyond this window, "okay" / "yes" / "next"
+/// spoken a second time is accepted normally.
+const DUPLICATE_ECHO_WINDOW: Duration = Duration::from_secs(12);
+
+/// Window during which a follow-up dictation into the SAME app gets a
+/// leading space (smart spacing) so consecutive bursts don't butt together.
+const SMART_SPACING_WINDOW: Duration = Duration::from_secs(8);
+
+/// Recordings longer than this are transcribed in chunks instead of one
+/// giant `whisper.full()` call, so a failure late in a long take doesn't
+/// discard everything before it, and each chunk's text lands as it finishes.
+const CHUNK_THRESHOLD_SECONDS: f64 = 45.0;
+/// Target length of each transcription chunk for long recordings.
+const CHUNK_TARGET_SECONDS: f64 = 30.0;
+
+/// The most recent successful injection — text plus when and where it
+/// happened. Drives re-paste, the time-gated duplicate check, and smart
+/// spacing between consecutive dictations.
+#[derive(Debug, Clone)]
+pub struct LastInjection {
+    pub text: String,
+    /// When it was injected. `None` for the DB-seeded value at startup (a
+    /// previous session) so a first dictation is never treated as a dup.
+    pub at: Option<Instant>,
+    /// Foreground app it was injected into, for smart spacing.
+    pub app: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecState {
     Idle,
@@ -108,6 +152,10 @@ pub enum Status {
     Transcribing,
     Injected { text: String, source_app: Option<String> },
     Cancelled,
+    /// We recorded but heard no usable speech (below the VAD threshold, or
+    /// only a hallucination). Distinct from `Cancelled` so the HUD can show
+    /// a "didn't catch that" hint instead of vanishing silently.
+    NoSpeech,
     Error { message: String },
 }
 
@@ -118,8 +166,13 @@ pub struct Controller {
     settings: Arc<SettingsStore>,
     sounds: Arc<SoundPlayer>,
     app: AppHandle,
-    /// Last text we successfully injected. Used by the re-paste hotkey.
-    last_injected: Arc<Mutex<Option<String>>>,
+    /// Last text we successfully injected (+ when/where). Used by the
+    /// re-paste hotkey, the time-gated duplicate check, and smart spacing.
+    last_injected: Arc<Mutex<Option<LastInjection>>>,
+    /// Foreground window/app captured at record-start, so injection lands in
+    /// the window the user was in when they began — not wherever focus
+    /// happens to be when transcription finishes.
+    capture_target: Arc<Mutex<Option<focus::CaptureTarget>>>,
     /// When true, transcriptions are emitted via `murmr:status` but NOT
     /// pasted into the focused field and NOT saved to the DB. Used by the
     /// onboarding wizard's Practice step.
@@ -135,7 +188,15 @@ impl Controller {
         app: AppHandle,
         practice_mode: Arc<AtomicBool>,
     ) -> Self {
-        let seed = db.recent_transcriptions(1).ok().and_then(|v| v.into_iter().next()).map(|t| t.text);
+        let seed = db
+            .recent_transcriptions(1)
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .map(|t| LastInjection {
+                text: t.text,
+                at: None,
+                app: None,
+            });
         Self {
             recorder: Arc::new(Recorder::new()),
             transcriber,
@@ -144,6 +205,7 @@ impl Controller {
             sounds,
             app,
             last_injected: Arc::new(Mutex::new(seed)),
+            capture_target: Arc::new(Mutex::new(None)),
             practice_mode,
         }
     }
@@ -175,6 +237,17 @@ impl Controller {
                         });
                         continue;
                     }
+                    // Capture the window/app the user is focused on RIGHT NOW,
+                    // before transcription (which can take seconds and during
+                    // which they may alt-tab). Injection later re-targets this
+                    // window so text never lands in the wrong place, and the
+                    // app name labels the Insights breakdown.
+                    let target = focus::capture_foreground();
+                    perf_log::append(&format!(
+                        "[ctrl] captured foreground target: app={:?} id={:?}",
+                        target.app_name, target.window_id
+                    ));
+                    *self.capture_target.lock() = Some(target);
                     state = RecState::HoldUncertain;
                     hotkey::set_recording_active(true);
                     // Use the user-perceived press time, not Now. For bare-
@@ -294,23 +367,30 @@ impl Controller {
                     self.repaste_last();
                 }
                 (HotkeyEvent::RepeatLast, _) => {}
+
+                // Pop the last transcript into an editable HUD bubble.
+                (HotkeyEvent::EditLast, RecState::Idle) => {
+                    self.edit_last();
+                }
+                (HotkeyEvent::EditLast, _) => {}
             }
         }
     }
 
     fn repaste_last(&self) {
-        let text = match self.last_injected.lock().clone() {
-            Some(t) if !t.is_empty() => t,
+        let text = match self.last_injected.lock().as_ref() {
+            Some(li) if !li.text.is_empty() => li.text.clone(),
             _ => {
                 self.emit(Status::Cancelled);
                 return;
             }
         };
         let app = self.app.clone();
+        let keystroke = self.settings.get().injection_mode == "keystroke";
         std::thread::Builder::new()
             .name("murmr-repaste".into())
             .spawn(move || {
-                if let Err(e) = injector::inject_text(&text) {
+                if let Err(e) = injector::inject_text(&text, keystroke) {
                     let _ = app.emit(
                         "murmr:status",
                         &Status::Error {
@@ -328,6 +408,38 @@ impl Controller {
                 );
             })
             .expect("failed to spawn re-paste thread");
+    }
+
+    /// Pop the most recent transcript into an editable HUD bubble so a single
+    /// mis-heard word can be fixed and re-injected. Triggered by the optional
+    /// `edit_last_hotkey`.
+    ///
+    /// Focus dance: the HUD normally never takes focus (so injection targets
+    /// the user's app). For editing we DO need it focused so the user can
+    /// type — so we first stash the current foreground window (the app the
+    /// edited text will go back into), then show + focus the HUD. On Insert,
+    /// the `insert_edited` command restores focus to that window before
+    /// injecting.
+    fn edit_last(&self) {
+        let text = self
+            .last_injected
+            .lock()
+            .as_ref()
+            .map(|li| li.text.clone())
+            .unwrap_or_default();
+        if text.is_empty() {
+            self.emit(Status::Cancelled);
+            return;
+        }
+        // Remember the app to re-inject into (current foreground — the HUD
+        // hasn't taken focus yet).
+        set_edit_target(focus::foreground_window_id());
+        // Tell the HUD to render the editable bubble, then show + focus it.
+        let _ = self.app.emit("murmr:edit-last", text);
+        self.show_hud();
+        if let Some(hud) = self.app.get_webview_window("hud") {
+            let _ = hud.set_focus();
+        }
     }
 
     fn start_recording(&self) -> Result<(), String> {
@@ -415,12 +527,14 @@ impl Controller {
         ));
 
         // Energy-based VAD — bail out before invoking Whisper on silence.
+        // Emit NoSpeech (not Cancelled) so the HUD can tell the user we
+        // didn't hear them, rather than just vanishing.
         if !has_speech(&cap.samples, cap.sample_rate, VAD_RMS_THRESHOLD) {
             perf_log::append(&format!(
                 "[ctrl] VAD rejected: peak chunk RMS {:.4} below threshold {:.4} → no transcription",
                 peak, VAD_RMS_THRESHOLD,
             ));
-            self.emit(Status::Cancelled);
+            self.emit(Status::NoSpeech);
             self.hide_hud();
             return;
         }
@@ -432,6 +546,10 @@ impl Controller {
         let app = self.app.clone();
         let last_injected = Arc::clone(&self.last_injected);
         let practice_mode = Arc::clone(&self.practice_mode);
+        // Take the window/app we captured at record-start; injection re-targets
+        // it so text can't land in whatever window has focus when Whisper
+        // finishes.
+        let capture_target = self.capture_target.lock().take().unwrap_or_default();
 
         let frames = cap.samples.len() as f64 / cap.channels.max(1) as f64;
         let duration_ms = ((frames / cap.sample_rate.max(1) as f64) * 1000.0) as i64;
@@ -456,7 +574,12 @@ impl Controller {
                     let samples_16k =
                         audio::to_whisper_format(&cap.samples, cap.sample_rate, cap.channels)?;
                     perf_log::append("[ctrl] resample done, invoking whisper");
-                    transcriber.transcribe(&samples_16k, initial_prompt.as_deref())
+                    transcribe_maybe_chunked(
+                        &transcriber,
+                        &samples_16k,
+                        initial_prompt.as_deref(),
+                        settings.accuracy_mode,
+                    )
                 })();
                 perf_log::append(&format!(
                     "[ctrl] whisper returned: ok={}",
@@ -475,7 +598,9 @@ impl Controller {
 
                 match result {
                     Ok(text) if text.is_empty() => {
-                        let _ = app.emit("murmr:status", &Status::Cancelled);
+                        // Whisper produced nothing usable (empty or a discarded
+                        // hallucination) — tell the user we didn't catch it.
+                        let _ = app.emit("murmr:status", &Status::NoSpeech);
                         hide_hud();
                     }
                     Ok(text) if text_is_suspicious(&text, &last_injected) => {
@@ -503,8 +628,74 @@ impl Controller {
                             return;
                         }
 
-                        perf_log::append("[ctrl] starting inject_text");
-                        if let Err(e) = injector::inject_text(&text) {
+                        // Verify we're still pointed at the window the user
+                        // started in. If focus moved during transcription,
+                        // try to restore it; if that fails, refuse to paste
+                        // (dropping text into the wrong app is worse than not
+                        // pasting) and keep it available for re-paste.
+                        if let Some(target_id) = capture_target.window_id {
+                            if focus::foreground_window_id() != Some(target_id) {
+                                perf_log::append(
+                                    "[ctrl] focus changed since record-start — attempting refocus",
+                                );
+                                focus::refocus_window(target_id);
+                                std::thread::sleep(Duration::from_millis(60));
+                                if focus::foreground_window_id() != Some(target_id) {
+                                    perf_log::append(
+                                        "[ctrl] refocus failed — refusing to paste into the wrong window",
+                                    );
+                                    // Keep the text for re-paste, but mark it
+                                    // as NOT actually injected (at: None) so
+                                    // the next dictation's smart-spacing
+                                    // doesn't prepend a space off a paste that
+                                    // never landed.
+                                    *last_injected.lock() = Some(LastInjection {
+                                        text: text.clone(),
+                                        at: None,
+                                        app: capture_target.app_name.clone(),
+                                    });
+                                    sounds.play_error_beep();
+                                    let _ = app.emit(
+                                        "murmr:status",
+                                        &Status::Error {
+                                            message: "Focus changed — text not inserted. Use re-paste to drop it where you want it.".into(),
+                                        },
+                                    );
+                                    hide_hud();
+                                    return;
+                                }
+                            }
+                        }
+
+                        // Smart spacing: if the previous dictation went into
+                        // the SAME app moments ago, prefix a space so back-to-
+                        // back bursts don't butt together ("…manifest.Next…").
+                        let mut to_inject = text.clone();
+                        if settings.smart_spacing {
+                            let guard = last_injected.lock();
+                            if let Some(li) = guard.as_ref() {
+                                let recent = li
+                                    .at
+                                    .map(|t| t.elapsed() < SMART_SPACING_WINDOW)
+                                    .unwrap_or(false);
+                                let same_app =
+                                    li.app.is_some() && li.app == capture_target.app_name;
+                                let starts_wordy = to_inject
+                                    .chars()
+                                    .next()
+                                    .map(|c| c.is_alphanumeric())
+                                    .unwrap_or(false);
+                                if recent && same_app && starts_wordy {
+                                    to_inject.insert(0, ' ');
+                                }
+                            }
+                        }
+
+                        let keystroke = settings.injection_mode == "keystroke";
+                        perf_log::append(&format!(
+                            "[ctrl] starting inject_text (keystroke={keystroke})"
+                        ));
+                        if let Err(e) = injector::inject_text(&to_inject, keystroke) {
                             perf_log::append(&format!("[ctrl] inject_text failed: {e}"));
                             sounds.play_error_beep();
                             let _ = app.emit(
@@ -520,7 +711,12 @@ impl Controller {
 
                         let word_count = text.split_whitespace().count() as i64;
                         perf_log::append("[ctrl] before insert_transcription");
-                        match db.insert_transcription(&text, word_count, duration_ms, None) {
+                        match db.insert_transcription(
+                            &text,
+                            word_count,
+                            duration_ms,
+                            capture_target.app_name.as_deref(),
+                        ) {
                             Ok(_) => {
                                 perf_log::append("[ctrl] insert_transcription ok");
                                 let now_ms = std::time::SystemTime::now()
@@ -596,7 +792,11 @@ impl Controller {
                             }
                         }
 
-                        *last_injected.lock() = Some(text.clone());
+                        *last_injected.lock() = Some(LastInjection {
+                            text: text.clone(),
+                            at: Some(Instant::now()),
+                            app: capture_target.app_name.clone(),
+                        });
 
                         // Stop chime already fired on release in run() —
                         // don't double-play here.
@@ -604,7 +804,7 @@ impl Controller {
                             "murmr:status",
                             &Status::Injected {
                                 text,
-                                source_app: None,
+                                source_app: capture_target.app_name.clone(),
                             },
                         );
                         hide_hud();
@@ -690,6 +890,11 @@ impl Controller {
         if let Err(e) = hud.set_always_on_top(true) {
             perf_log::append(&format!("[hud] set_always_on_top failed: {e}"));
         }
+
+        // Streamer mode: exclude the HUD from screen capture so the recording
+        // pill never shows up in OBS / a shared screen. Re-applied on every
+        // show so toggling the setting takes effect on the next dictation.
+        apply_capture_exclusion(&hud, self.settings.get().streamer_mode);
 
         // Verify the show actually took. If the window reports invisible
         // after we asked it to show, that's the post-boot bug — log it
@@ -824,17 +1029,119 @@ impl Controller {
 /// matches the last successfully-injected text byte-for-byte (or differs only
 /// by the smart-space prefix). That's almost always Whisper falling back to a
 /// trained-data echo on quiet/garbled input.
-fn text_is_suspicious(candidate: &str, last_injected: &Mutex<Option<String>>) -> bool {
+fn text_is_suspicious(candidate: &str, last_injected: &Mutex<Option<LastInjection>>) -> bool {
     let last = last_injected.lock();
     let Some(prev) = last.as_ref() else {
         return false;
     };
+    // Only a RECENT identical injection is treated as a Whisper echo. The
+    // same phrase said again after the echo window — or a match against the
+    // DB-seeded value from a previous session (`at` is None) — is accepted
+    // as intentional, so repeating "okay"/"yes"/"next" works.
+    let recent = prev
+        .at
+        .map(|t| t.elapsed() < DUPLICATE_ECHO_WINDOW)
+        .unwrap_or(false);
+    if !recent {
+        return false;
+    }
     let cand_norm = candidate.trim();
-    let prev_norm = prev.trim();
+    let prev_norm = prev.text.trim();
     if cand_norm.is_empty() || prev_norm.is_empty() {
         return false;
     }
     cand_norm == prev_norm
+}
+
+/// Transcribe, splitting very long recordings into sequential chunks so a
+/// late failure doesn't discard everything and each piece completes on its
+/// own. Short recordings take the original single-shot path.
+fn transcribe_maybe_chunked(
+    transcriber: &Transcriber,
+    samples_16k: &[f32],
+    initial_prompt: Option<&str>,
+    accuracy: bool,
+) -> Result<String, String> {
+    let total_seconds = samples_16k.len() as f64 / 16_000.0;
+    if total_seconds <= CHUNK_THRESHOLD_SECONDS {
+        return transcriber.transcribe(samples_16k, initial_prompt, accuracy);
+    }
+
+    perf_log::append(&format!(
+        "[ctrl] long recording ({total_seconds:.1}s) — transcribing in chunks"
+    ));
+    let boundaries = chunk_boundaries(samples_16k, 16_000, CHUNK_TARGET_SECONDS);
+    let mut pieces: Vec<String> = Vec::new();
+    let mut ok_count = 0usize;
+    let mut last_err: Option<String> = None;
+    let mut start = 0usize;
+    for (i, end) in boundaries.iter().enumerate() {
+        let seg = &samples_16k[start..*end];
+        match transcriber.transcribe(seg, initial_prompt, accuracy) {
+            Ok(t) => {
+                ok_count += 1;
+                let t = t.trim();
+                if !t.is_empty() {
+                    pieces.push(t.to_string());
+                }
+            }
+            Err(e) => {
+                // A failed chunk mustn't discard the whole recording — keep
+                // the pieces we already have and log the gap.
+                perf_log::append(&format!(
+                    "[ctrl] chunk {i} failed: {e} — keeping {} prior chunk(s)",
+                    pieces.len()
+                ));
+                last_err = Some(e);
+            }
+        }
+        start = *end;
+    }
+    // If EVERY chunk errored, surface the failure rather than pretending the
+    // audio was silent ("no speech").
+    if ok_count == 0 {
+        if let Some(e) = last_err {
+            return Err(e);
+        }
+    }
+    Ok(pieces.join(" "))
+}
+
+/// Compute chunk end-indices for a long recording, nudging each cut to the
+/// quietest 100 ms within ±2 s of the nominal boundary so we split on a pause
+/// rather than mid-word. The final boundary is always the sample count.
+fn chunk_boundaries(samples: &[f32], sample_rate: usize, target_seconds: f64) -> Vec<usize> {
+    let n = samples.len();
+    let target = (target_seconds * sample_rate as f64) as usize;
+    let search = 2 * sample_rate; // ±2 s
+    let win = (sample_rate / 10).max(1); // 100 ms energy window
+    let mut bounds = Vec::new();
+    let mut pos = 0usize;
+    while pos + target < n {
+        let nominal = pos + target;
+        let lo = nominal.saturating_sub(search).max(pos + win);
+        let hi = (nominal + search).min(n.saturating_sub(win));
+        let mut best = nominal.min(n);
+        let mut best_rms = f32::MAX;
+        let mut i = lo;
+        while i < hi {
+            let block = &samples[i..(i + win).min(n)];
+            let rms =
+                (block.iter().map(|&s| s * s).sum::<f32>() / block.len().max(1) as f32).sqrt();
+            if rms < best_rms {
+                best_rms = rms;
+                best = i;
+            }
+            i += win;
+        }
+        if best <= pos {
+            best = nominal.min(n);
+        }
+        bounds.push(best);
+        pos = best;
+    }
+    bounds.push(n);
+    bounds
 }
 
 /// Returns true if at least `VAD_MIN_SPEECH_CHUNKS` 100 ms chunks of the
@@ -890,6 +1197,32 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) -> Result<(), String> 
     hud.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Exclude (or re-include) the HUD window from screen capture. On Windows
+/// this uses `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` so OBS /
+/// Teams / any capture sees a hole where the pill is. Best-effort — logs and
+/// moves on if the HWND isn't available or the OS is too old (pre-Win10 2004).
+#[cfg(windows)]
+fn apply_capture_exclusion(hud: &tauri::WebviewWindow, exclude: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+    match hud.hwnd() {
+        Ok(hwnd) => unsafe {
+            let affinity = if exclude { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+            if SetWindowDisplayAffinity(hwnd.0 as _, affinity) == 0 {
+                perf_log::append("[hud] SetWindowDisplayAffinity failed (pre-Win10 2004?)");
+            }
+        },
+        Err(e) => perf_log::append(&format!("[hud] hwnd() unavailable for capture exclusion: {e}")),
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_capture_exclusion(_hud: &tauri::WebviewWindow, _exclude: bool) {
+    // macOS equivalent (NSWindow.sharingType = .none) would go here; the HUD
+    // is a transparent overlay and is a lower priority on macOS.
 }
 
 /// Build the HUD window from scratch with the same config as

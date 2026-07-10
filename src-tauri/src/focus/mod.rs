@@ -74,3 +74,58 @@ pub fn is_foreground_fullscreen() -> bool {
 pub fn is_foreground_fullscreen() -> bool {
     false
 }
+
+// ---------------------------------------------------------------------------
+// Foreground app / window identity (for wrong-window paste protection + the
+// Insights "where you dictate" breakdown).
+// ---------------------------------------------------------------------------
+
+/// Executable base name of the foreground app (e.g. "Code.exe"). None on
+/// platforms without a native implementation.
+#[cfg(windows)]
+pub fn foreground_app() -> Option<String> {
+    windows::foreground_app()
+}
+
+#[cfg(not(windows))]
+pub fn foreground_app() -> Option<String> {
+    None
+}
+
+/// Opaque Send-able id of the foreground window, compared later to detect
+/// focus changes during transcription. None where unsupported.
+#[cfg(windows)]
+pub fn foreground_window_id() -> Option<isize> {
+    windows::foreground_window_id()
+}
+
+#[cfg(not(windows))]
+pub fn foreground_window_id() -> Option<isize> {
+    None
+}
+
+/// Best-effort restore of foreground focus to a previously-captured window.
+#[cfg(windows)]
+pub fn refocus_window(id: isize) -> bool {
+    windows::refocus_window(id)
+}
+
+#[cfg(not(windows))]
+pub fn refocus_window(_id: isize) -> bool {
+    false
+}
+
+/// A capture of the window the user was focused on when dictation started.
+#[derive(Debug, Clone, Default)]
+pub struct CaptureTarget {
+    pub window_id: Option<isize>,
+    pub app_name: Option<String>,
+}
+
+/// Snapshot the current foreground target (window id + app name).
+pub fn capture_foreground() -> CaptureTarget {
+    CaptureTarget {
+        window_id: foreground_window_id(),
+        app_name: foreground_app(),
+    }
+}

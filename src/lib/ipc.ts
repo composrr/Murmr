@@ -41,6 +41,7 @@ export type DictationStatus =
   | { kind: 'transcribing' }
   | { kind: 'injected'; text: string; source_app: string | null }
   | { kind: 'cancelled' }
+  | { kind: 'no-speech' }
   | { kind: 'error'; message: string };
 
 export function ping(): Promise<PingResponse> {
@@ -65,6 +66,17 @@ export function deleteTranscription(id: number): Promise<void> {
 
 export function reinsertText(text: string): Promise<void> {
   return invoke<void>('reinsert_text', { text });
+}
+
+/** Insert edited text from the edit-last bubble (restores focus to the
+ * original app first). */
+export function insertEdited(text: string): Promise<void> {
+  return invoke<void>('insert_edited', { text });
+}
+
+/** Hide the HUD window (used to dismiss the edit-last bubble). */
+export function hideHudWindow(): Promise<void> {
+  return invoke<void>('hide_hud_window');
 }
 
 export function transcriptionCount(): Promise<number> {
@@ -208,7 +220,6 @@ export interface Settings {
   cancel_hotkey: string;
   hud_show_waveform: boolean;
   hud_show_timer: boolean;
-  hud_show_word_count: boolean;
   hud_position: string;
   sound_start_click: boolean;
   sound_complete_chime: boolean;
@@ -239,6 +250,39 @@ export interface Settings {
   /** Ignore the dictation hotkey while a fullscreen app (game, video,
    * presentation) is focused. Default true. */
   pause_during_fullscreen: boolean;
+
+  // ---- Developer-grade formatting ----
+  /** Type exactly what was said — bypass the whole post-processing
+   * pipeline (corrections, filler-strip, voice commands, caps, lists,
+   * dictionary). Default false. */
+  literal_mode: boolean;
+  /** Detect spoken bulleted lists and format them as "- " items. */
+  auto_bulleted_lists: boolean;
+  /** Recognize spoken code symbols (colon, paren, backtick, …) as literal
+   * punctuation. Off by default. */
+  voice_command_symbols: boolean;
+  /** Insert a separating space between back-to-back dictations. Default true. */
+  smart_spacing: boolean;
+
+  // ---- Dictionary trust ----
+  /** Fuzzy-correct near-miss tokens against enabled "word" entries. Opt-in (default false). */
+  fuzzy_dictionary: boolean;
+
+  // ---- Model / accuracy ----
+  /** Filename of the Whisper model inside the models dir. */
+  model_name: string;
+  /** Beam-search decoding: more accurate, a bit slower. Default false. */
+  accuracy_mode: boolean;
+
+  // ---- Streamer mode ----
+  /** Hide the HUD from screen capture + suppress notifications. Default false. */
+  streamer_mode: boolean;
+  /** Also mute Murmr's own chimes while streamer mode is on. Default false. */
+  streamer_mode_mute_chimes: boolean;
+
+  // ---- Edit-last ----
+  /** rdev key name for the "edit & re-inject last transcript" hotkey. Empty = disabled. */
+  edit_last_hotkey: string;
 }
 
 export function getSettings(): Promise<Settings> {
@@ -258,6 +302,10 @@ export interface InputDevice {
 
 export function listInputDevices(): Promise<InputDevice[]> {
   return invoke<InputDevice[]>('list_input_devices');
+}
+
+export function listModels(): Promise<string[]> {
+  return invoke<string[]>('list_models');
 }
 
 // ----- Paths / files -----

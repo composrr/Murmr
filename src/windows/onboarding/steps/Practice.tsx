@@ -149,9 +149,9 @@ export default function Practice(props: StepProps) {
           anywhere. The transcript appears below — nothing is pasted or saved.
         </>
       }
-      primaryLabel="Finish"
+      primaryLabel="Continue"
       primaryDisabled={!hasSucceeded}
-      onPrimary={props.finish}
+      onPrimary={props.next}
     >
       <div className="flex flex-col items-center w-full">
         <div className="text-[12px] uppercase tracking-[0.8px] text-text-quaternary font-medium mb-3">
@@ -200,7 +200,7 @@ export default function Practice(props: StepProps) {
               ✓
             </span>
             <span className="text-[12px] text-text-primary">
-              Nice. Murmr is working. Click Finish whenever you're ready.
+              Nice. Murmr is working. Click Continue whenever you're ready.
             </span>
           </div>
         )}

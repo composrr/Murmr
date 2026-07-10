@@ -58,9 +58,23 @@ use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
 use crate::perf_log;
 
-/// process_id → original volume (0.0–1.0) at the time we ducked. Cleared
-/// each `unduck()`.
-static SAVED_VOLUMES: Mutex<Option<HashMap<u32, f32>>> = Mutex::new(None);
+/// What we recorded for a PID when ducking: the `original` volume to restore
+/// to, and the `ducked` target we actually set. At restore time, if a
+/// session's live volume no longer matches `ducked`, the user moved that
+/// slider by hand mid-duck — so we leave it alone rather than yanking it back
+/// (possibly above the level they just chose).
+#[derive(Debug, Clone, Copy)]
+struct SavedVol {
+    original: f32,
+    ducked: f32,
+}
+
+/// How far a session's current volume may drift from the ducked target before
+/// we treat it as a deliberate manual change and skip the restore.
+const MANUAL_CHANGE_TOLERANCE: f32 = 0.05;
+
+/// process_id → saved volumes at the time we ducked. Cleared each `unduck()`.
+static SAVED_VOLUMES: Mutex<Option<HashMap<u32, SavedVol>>> = Mutex::new(None);
 
 /// Per-thread COM init. Re-entry on the same thread is harmless (returns
 /// S_FALSE for matching apartment, RPC_E_CHANGED_MODE for a flip).
@@ -198,7 +212,7 @@ fn duck_inner(amount: f32) {
         }
     }
 
-    let mut saved: HashMap<u32, f32> = HashMap::new();
+    let mut saved: HashMap<u32, SavedVol> = HashMap::new();
     let factor = (1.0 - amount).clamp(0.0, 1.0);
     let mut count = 0;
 
@@ -220,9 +234,16 @@ fn duck_inner(amount: f32) {
             // (First shipped in v0.1.52, reverted after a test that — in
             // hindsight — was invalidated by the concurrent AVX-512 crash.
             // Re-applied in v0.1.58 with the retry pass below.)
-            let prior = saved.get(&pid).copied().unwrap_or(0.0);
-            saved.insert(pid, current.max(prior));
+            let prior = saved.get(&pid).map(|s| s.original).unwrap_or(0.0);
+            let original = current.max(prior);
             let target = (current * factor).clamp(0.0, 1.0);
+            saved.insert(
+                pid,
+                SavedVol {
+                    original,
+                    ducked: (original * factor).clamp(0.0, 1.0),
+                },
+            );
             // GUID context arg = caller's identifier so the OS can route
             // change-notifications back to us. Passing zero/null is fine
             // when we don't care.
@@ -329,13 +350,25 @@ fn unduck_inner() {
 /// session this pass (candidates for retry). Restore failures (COM error
 /// on a visible session) are logged but NOT retried — the session was
 /// there, the set just failed, and hammering it won't help.
-fn restore_pass(targets: &HashMap<u32, f32>) -> HashMap<u32, f32> {
+fn restore_pass(targets: &HashMap<u32, SavedVol>) -> HashMap<u32, SavedVol> {
     let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for_each_session(|pid, vol| {
-        if let Some(original) = targets.get(&pid) {
+        if let Some(saved) = targets.get(&pid) {
             seen.insert(pid);
             unsafe {
-                if let Err(e) = vol.SetMasterVolume(*original, std::ptr::null()) {
+                // Non-destructive: if the session's live volume no longer
+                // matches the level we ducked it to, the user adjusted it by
+                // hand while we were recording — respect their choice and
+                // don't restore over it.
+                let current = vol.GetMasterVolume().unwrap_or(saved.ducked);
+                if (current - saved.ducked).abs() > MANUAL_CHANGE_TOLERANCE {
+                    perf_log::append(&format!(
+                        "[duck] pid={pid} volume changed by user mid-duck (live {current:.2} vs ducked {:.2}) — leaving as-is",
+                        saved.ducked
+                    ));
+                    return;
+                }
+                if let Err(e) = vol.SetMasterVolume(saved.original, std::ptr::null()) {
                     perf_log::append(&format!("[duck] pid={pid} restore failed: {e:?}"));
                 }
             }

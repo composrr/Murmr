@@ -4,17 +4,22 @@ import { useTheme } from '../../hooks/useTheme';
 import { completeOnboarding, isMac } from '../../lib/ipc';
 import Welcome from './steps/Welcome';
 import Name from './steps/Name';
+import HotkeyChoice from './steps/HotkeyChoice';
 import {
   MicPermissionStep,
   InputMonitoringStep,
   AccessibilityStep,
 } from './steps/MacPermissionSteps';
 import MicTest from './steps/MicTest';
+import Practice from './steps/Practice';
 import Done from './steps/Done';
 
-// The mic-test screen already verifies end-to-end (mic → Whisper → text), so
-// a separate "try it out" step would just be a duplicate. We jump straight
-// to the celebratory Done screen after the test.
+// Flow: Welcome → Name → Hotkey walkthrough → [mac permissions] → mic test →
+// hands-on practice run → Done. The hotkey step teaches tap-vs-hold; the
+// practice step lets the user try the real hotkey with live transcript (never
+// pasted/saved) before finishing. Practice PRECEDES Done and advances via
+// next() — Done stays the single terminal step so it can complete onboarding
+// and, on macOS, restart to apply the Input Monitoring / Accessibility grants.
 //
 // The three permission steps are macOS-only — Windows permissions are either
 // silent (mic, after a one-time prompt) or automatic, while macOS gates
@@ -28,10 +33,12 @@ import Done from './steps/Done';
 const ALL_STEPS = [
   { key: 'welcome', component: Welcome, macOnly: false },
   { key: 'name', component: Name, macOnly: false },
+  { key: 'hotkey', component: HotkeyChoice, macOnly: false },
   { key: 'mic-permission', component: MicPermissionStep, macOnly: true },
   { key: 'input-monitoring', component: InputMonitoringStep, macOnly: true },
   { key: 'accessibility', component: AccessibilityStep, macOnly: true },
   { key: 'mic-test', component: MicTest, macOnly: false },
+  { key: 'practice', component: Practice, macOnly: false },
   { key: 'done', component: Done, macOnly: false },
 ] as const;
 

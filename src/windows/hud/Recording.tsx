@@ -5,36 +5,17 @@ interface Props {
   rms: number[];
   /** ms timestamp when recording began. */
   startedAt: number;
-  /** Cumulative milliseconds in which the user was actually speaking. */
-  activeSpeechMs: number;
   /** Show the live waveform bars (Settings → hud_show_waveform). */
   showWaveform: boolean;
   /** Show the elapsed timer (Settings → hud_show_timer). */
   showTimer: boolean;
-  /** Show the live word-count estimate (Settings → hud_show_word_count). */
-  showWordCount: boolean;
 }
-
-/// Live word-count estimate rate. We can't know the real word count until
-/// transcription finishes (no streaming), so the pill estimates from how
-/// long the user has actively been speaking × an assumed words-per-minute.
-///
-/// 150 WPM is a realistic average dictation rate. The previous 220 WPM was
-/// auctioneer-fast and made the estimate run ~1.4× high — which, because
-/// English averages ~1.4 syllables per word, made the live count read like
-/// it was counting SYLLABLES rather than words. 150 tracks normal speech
-/// much more closely. (The saved/history word count is exact — computed
-/// from the actual transcript — so only this in-progress pill is an
-/// estimate.)
-const WORDS_PER_MS = 150 / 60 / 1000;
 
 export default function Recording({
   rms,
   startedAt,
-  activeSpeechMs,
   showWaveform,
   showTimer,
-  showWordCount,
 }: Props) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -47,10 +28,6 @@ export default function Recording({
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = Math.floor(elapsedSeconds % 60);
   const timer = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-  // Estimate words from active-speech time only — the timer keeps moving even
-  // when the user is paused, but the word count shouldn't.
-  const words = Math.round(activeSpeechMs * WORDS_PER_MS);
 
   return (
     <div
@@ -101,19 +78,6 @@ export default function Recording({
         >
           {timer}
         </span>
-      )}
-
-      {showWordCount && (
-        <>
-          {/* Only show the separator dot when there's a timer before it,
-              so the word count doesn't lead with a stray "·". */}
-          {showTimer && (
-            <span style={{ color: 'rgba(212,212,207,0.35)', fontSize: 13 }}>·</span>
-          )}
-          <span style={{ color: 'rgba(212,212,207,0.7)', fontSize: 13 }}>
-            {words} {words === 1 ? 'word' : 'words'}
-          </span>
-        </>
       )}
     </div>
   );

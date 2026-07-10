@@ -21,10 +21,11 @@ export default function Hotkeys() {
   const dictation = settings?.dictation_hotkey ?? 'ControlRight';
   const cancel = settings?.cancel_hotkey ?? 'Escape';
   const repeat = settings?.repeat_hotkey ?? '';
+  const editLast = settings?.edit_last_hotkey ?? '';
 
   // Build the forbid list per-row: a key bound to one shortcut shouldn't be
-  // re-bindable to another. Empty repeat = no conflict to track.
-  const allBound = [dictation, cancel, repeat].filter((k) => k.length > 0);
+  // re-bindable to another. Empty repeat/edit-last = no conflict to track.
+  const allBound = [dictation, cancel, repeat, editLast].filter((k) => k.length > 0);
 
   return (
     <div className="max-w-[640px]">
@@ -66,6 +67,36 @@ export default function Hotkeys() {
               onClick={() => update({ repeat_hotkey: '' })}
               className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
               title="Disable re-paste shortcut"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      </Row>
+
+      <Row
+        name="Edit last shortcut"
+        hint={
+          editLast
+            ? `Press ${displayName(editLast)} to pop the last transcript into an editable bubble to fix a word, then re-insert.`
+            : 'Pop the last transcript into an editable bubble to fix a word, then re-insert. Click the chip → press a key. Click "clear" to disable.'
+        }
+      >
+        <div className="flex items-center gap-2 w-[260px]">
+          <div className="flex-1">
+            <HotkeyCapture
+              value={editLast || 'click to set'}
+              onChange={(next) => update({ edit_last_hotkey: next })}
+              allowBareModifiers
+              forbidden={allBound.filter((k) => k !== editLast)}
+              disabled={!settings}
+            />
+          </div>
+          {editLast && (
+            <button
+              onClick={() => update({ edit_last_hotkey: '' })}
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              title="Disable edit-last shortcut"
             >
               clear
             </button>

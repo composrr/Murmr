@@ -31,10 +31,22 @@ pub fn process(
     dictionary: &[DictionaryEntry],
 ) -> ProcessOutcome {
     let mut stripped_fillers: HashMap<String, i64> = HashMap::new();
+
+    // Literal mode: "type exactly what I said." Bypass the ENTIRE pipeline
+    // (self-corrections, filler-strip, voice commands, capitalization, lists,
+    // dictionary) so dialogue and prose land verbatim. This is the escape
+    // hatch for writers whose words must not be silently rewritten.
+    if settings.literal_mode {
+        return ProcessOutcome {
+            text: text.trim().to_string(),
+            stripped_fillers,
+        };
+    }
+
     let mut out = text.to_string();
 
     // Self-corrections fire FIRST so the rest of the pipeline operates on
-    // the already-fixed sentence. Always-on for now (no setting yet).
+    // the already-fixed sentence. (Skipped entirely in literal mode above.)
     out = apply_self_corrections(&out);
 
     if settings.strip_fillers && !settings.filler_words.is_empty() {
@@ -57,6 +69,15 @@ pub fn process(
     // would otherwise wreck.
     if settings.auto_numbered_lists {
         out = apply_numbered_lists(&out);
+    }
+    if settings.auto_bulleted_lists {
+        out = apply_bulleted_lists(&out);
+    }
+    // Fuzzy proper-noun correction runs after list formatting and BEFORE
+    // literal replacements, snapping near-miss tokens to the intended
+    // dictionary "word" spelling (e.g. "Sersha" → "Saoirse").
+    if settings.fuzzy_dictionary {
+        out = apply_fuzzy_dictionary(&out, dictionary);
     }
     out = apply_dictionary(&out, dictionary);
 
@@ -187,6 +208,32 @@ const VOICE_COMMANDS: &[(&str, VoiceCommand)] = &[
         triggers: &["new paragraph"],
         replacement: "\n\n",
     }),
+    // Code/prose symbols — all gated by the single `voice_command_symbols`
+    // toggle (off by default, since these words appear in normal speech).
+    ("sym_colon", VoiceCommand {
+        triggers: &["colon"],
+        replacement: ":",
+    }),
+    ("sym_semicolon", VoiceCommand {
+        triggers: &["semicolon"],
+        replacement: ";",
+    }),
+    ("sym_open_paren", VoiceCommand {
+        triggers: &["open paren", "open parenthesis"],
+        replacement: "(",
+    }),
+    ("sym_close_paren", VoiceCommand {
+        triggers: &["close paren", "close parenthesis"],
+        replacement: ")",
+    }),
+    ("sym_backtick", VoiceCommand {
+        triggers: &["backtick", "back tick"],
+        replacement: "`",
+    }),
+    ("sym_hyphen", VoiceCommand {
+        triggers: &["hyphen"],
+        replacement: "-",
+    }),
 ];
 
 fn apply_voice_commands(text: &str, settings: &Settings) -> String {
@@ -199,6 +246,7 @@ fn apply_voice_commands(text: &str, settings: &Settings) -> String {
             "exclamation" => settings.voice_command_exclamation,
             "new_line" => settings.voice_command_new_line,
             "new_paragraph" => settings.voice_command_new_paragraph,
+            k if k.starts_with("sym_") => settings.voice_command_symbols,
             _ => false,
         };
         if !enabled {
@@ -497,6 +545,150 @@ fn apply_numbered_lists(text: &str) -> String {
     // Trailing text after the last marker.
     out.push_str(&text[cursor..]);
     out
+}
+
+// ---------------------------------------------------------------------------
+// 4c. Bulleted lists
+// ---------------------------------------------------------------------------
+//
+// Mirrors numbered lists for unordered enumeration. The speaker says
+// "bullet" (or "bullet point") before each item:
+//
+//   "Groceries. Bullet milk. Bullet eggs. Bullet bread."
+//      ↓
+//   "Groceries.\n- Milk.\n- Eggs.\n- Bread."
+//
+// Requires ≥2 markers so a stray "bullet" in prose isn't reformatted. We
+// deliberately do NOT use "dash" as a marker — it collides with the hyphen
+// symbol command and with ordinary usage.
+
+fn apply_bulleted_lists(text: &str) -> String {
+    let re = match Regex::new(
+        r"(?i)(^|[.!?,])\s+(?:(?:and|or|then|also|next|plus)\s+)?bullet(?:\s+point)?\s*[.,:!?]?\s*",
+    ) {
+        Ok(r) => r,
+        Err(_) => return text.to_string(),
+    };
+
+    let mut hits: Vec<(usize, usize)> = Vec::new(); // (cut_start, end)
+    for m in re.captures_iter(text) {
+        let leading = m.get(1).unwrap();
+        let whole_end = m.get(0).unwrap().end();
+        hits.push((leading.end(), whole_end));
+    }
+    if hits.len() < 2 {
+        return text.to_string();
+    }
+
+    let mut out = String::with_capacity(text.len() + hits.len() * 2);
+    let mut cursor = 0;
+    for (start, end) in &hits {
+        out.push_str(text[cursor..*start].trim_end());
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("- ");
+        cursor = *end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// 4d. Fuzzy proper-noun correction
+// ---------------------------------------------------------------------------
+//
+// Whisper's initial-prompt bias helps with names but isn't reliable. This
+// stage takes the enabled single-word "word" dictionary entries and snaps
+// near-miss tokens in the transcript to the intended spelling — conservative
+// by design: the token and target must share a first letter, be close in
+// length, and be within a small edit distance, so unrelated words are never
+// touched.
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return b.len();
+    }
+    if b.is_empty() {
+        return a.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr: Vec<usize> = vec![0; b.len() + 1];
+    for i in 1..=a.len() {
+        curr[0] = i;
+        for j in 1..=b.len() {
+            let cost = if a[i - 1].eq_ignore_ascii_case(&b[j - 1]) { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+fn best_fuzzy_match<'a>(tok: &str, words: &[&'a str]) -> Option<&'a str> {
+    // Exact match (case-insensitive) → already correct, leave it.
+    if words.iter().any(|w| w.eq_ignore_ascii_case(tok)) {
+        return None;
+    }
+    let tok_lower = tok.to_lowercase();
+    let tok_first = tok.chars().next();
+    let tlen = tok.chars().count();
+
+    let mut best: Option<(&'a str, usize)> = None;
+    for w in words {
+        // First letter must match — names/brands almost always get the
+        // initial right, and this rules out most coincidental matches.
+        let w_first = w.chars().next();
+        match (tok_first, w_first) {
+            (Some(t), Some(c)) if t.eq_ignore_ascii_case(&c) => {}
+            _ => continue,
+        }
+        let wlen = w.chars().count();
+        if (wlen as i32 - tlen as i32).abs() > 2 {
+            continue;
+        }
+        let d = levenshtein(&tok_lower, &w.to_lowercase());
+        // Distance ceiling scales gently with length.
+        let max_d = if tlen <= 5 { 1 } else { 2 };
+        if d >= 1 && d <= max_d && best.map_or(true, |(_, bd)| d < bd) {
+            best = Some((w, d));
+        }
+    }
+    best.map(|(w, _)| w)
+}
+
+fn apply_fuzzy_dictionary(text: &str, entries: &[DictionaryEntry]) -> String {
+    let words: Vec<&str> = entries
+        .iter()
+        .filter(|e| e.enabled && e.entry_type == "word")
+        // Only single alphabetic tokens ≥5 chars are safe to fuzzy-match —
+        // short words collide with common vocabulary too easily.
+        .map(|e| e.trigger.as_str())
+        .filter(|w| w.chars().count() >= 5 && w.chars().all(|c| c.is_alphabetic()))
+        .collect();
+    if words.is_empty() {
+        return text.to_string();
+    }
+
+    let re = match Regex::new(r"[A-Za-z]{5,}") {
+        Ok(r) => r,
+        Err(_) => return text.to_string(),
+    };
+    let mut result = String::with_capacity(text.len());
+    let mut last = 0;
+    for m in re.find_iter(text) {
+        result.push_str(&text[last..m.start()]);
+        let tok = m.as_str();
+        match best_fuzzy_match(tok, &words) {
+            Some(fixed) => result.push_str(fixed),
+            None => result.push_str(tok),
+        }
+        last = m.end();
+    }
+    result.push_str(&text[last..]);
+    result
 }
 
 // ---------------------------------------------------------------------------

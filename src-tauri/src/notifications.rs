@@ -81,10 +81,18 @@ fn check_and_fire_inner(
     perf_log::append("[notify] worker started");
 
     // Master toggle — bail before doing any work if the user turned
-    // notifications off.
-    if !settings.get().milestone_notifications {
-        perf_log::append("[notify] disabled in settings, bailing");
-        return;
+    // notifications off, or if streamer mode is on (no toasts should ever
+    // pop on a broadcast).
+    {
+        let s = settings.get();
+        if !s.milestone_notifications {
+            perf_log::append("[notify] disabled in settings, bailing");
+            return;
+        }
+        if s.streamer_mode {
+            perf_log::append("[notify] streamer mode on — suppressing notification");
+            return;
+        }
     }
 
     // Pull totals fresh so we see the row we just inserted.

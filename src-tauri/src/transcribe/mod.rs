@@ -131,10 +131,13 @@ impl Transcriber {
 
     /// Transcribe 16kHz mono f32 samples. `initial_prompt` biases Whisper's
     /// vocabulary — pass dictionary Words here so proper nouns survive.
+    /// `accuracy_mode` switches greedy decoding for beam search: noticeably
+    /// better on jargon/accents at the cost of some speed.
     pub fn transcribe(
         &self,
         samples_16k_mono: &[f32],
         initial_prompt: Option<&str>,
+        accuracy_mode: bool,
     ) -> Result<String, String> {
         let t_start = Instant::now();
         let threads = num_cpus().min(8) as i32;
@@ -146,7 +149,15 @@ impl Transcriber {
             .map_err(|e| format!("failed to create Whisper state: {e}"))?;
         let t_state_ready = Instant::now();
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // Beam search explores multiple hypotheses per step — slower but more
+        // robust on hard audio (accents, technical terms). Greedy best_of:1 is
+        // the fast default.
+        let strategy = if accuracy_mode {
+            SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 }
+        } else {
+            SamplingStrategy::Greedy { best_of: 1 }
+        };
+        let mut params = FullParams::new(strategy);
         params.set_n_threads(threads);
         params.set_translate(false);
         params.set_language(Some("en"));
@@ -184,7 +195,7 @@ impl Transcriber {
             0.0
         };
         perf_log::append(&format!(
-            "[transcribe] audio={audio_seconds:.2}s threads={threads} state={state_ms}ms full={full_ms}ms collect={collect_ms}ms total={total_ms}ms ratio={realtime_ratio:.2}x"
+            "[transcribe] audio={audio_seconds:.2}s threads={threads} accuracy={accuracy_mode} state={state_ms}ms full={full_ms}ms collect={collect_ms}ms total={total_ms}ms ratio={realtime_ratio:.2}x"
         ));
 
         if is_hallucination(&trimmed) {
