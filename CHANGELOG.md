@@ -76,6 +76,12 @@ Murmr behaves.
 
 ### Fixed
 
+- **No more `[BLANK_AUDIO]` typed into your text.** When you pause mid-
+  sentence (or a recording is silent), Whisper tags the gap with annotations
+  like `[BLANK_AUDIO]` / `[silence]` / `(music)`. Murmr now strips those
+  wherever they appear, so a pause leaves your real words untouched and a
+  fully-silent recording just shows the brief "Didn't catch that" hint
+  instead of typing anything.
 - **macOS: Murmr lives in the menu bar, not the Dock.** It now reliably runs
   as a menu-bar app with no Dock icon, closing the window hides it to the
   tray instead of appearing in the Dock.

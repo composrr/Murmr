@@ -5,9 +5,10 @@ pub mod postprocess;
 pub use postprocess::{build_initial_prompt, process, ProcessOutcome};
 
 use std::ffi::{c_char, c_void, CStr};
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 use std::time::Instant;
 
+use regex::Regex;
 use whisper_rs::{
     whisper_rs_sys::{ggml_log_level, ggml_log_set, whisper_log_set, whisper_print_system_info},
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
@@ -118,6 +119,52 @@ fn is_hallucination(text: &str) -> bool {
     HALLUCINATIONS.contains(&trimmed.as_str())
 }
 
+/// Regex matching Whisper's bracketed NON-SPEECH annotations — `[BLANK_AUDIO]`,
+/// `[silence]`, `(music)`, `[applause]`, etc. These are transcription
+/// artifacts the model emits for silent / non-speech spans, NOT words the user
+/// spoke. Deliberately narrow (a fixed vocabulary of known tags) so ordinary
+/// parentheticals the user actually dictates — "(see below)", "(John)" — are
+/// left untouched.
+fn nonspeech_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)[\[(]\s*(?:blank[\s_]*audio|silence|silent|music|sound|no[\s_]*speech|inaudible|applause|laughter|cough(?:ing)?|sniff(?:ing)?|breath(?:ing)?|sigh(?:s|ing)?|wind|static|noise|beep(?:ing)?|typing|clicking|footsteps|background(?:\s+noise)?|pause)\s*[\])]",
+        )
+        .expect("nonspeech annotation regex is valid")
+    })
+}
+
+/// Strip Whisper's bracketed non-speech annotations wherever they appear, so a
+/// mid-sentence pause never types "[BLANK_AUDIO]" into the user's document.
+/// Whitespace left behind is collapsed. If the whole output was one of these
+/// tags, the result is empty → the controller treats it as no-speech (a brief
+/// HUD hint, nothing injected).
+fn strip_nonspeech_annotations(text: &str) -> String {
+    let replaced = nonspeech_re().replace_all(text, " ");
+    let mut out = String::with_capacity(replaced.len());
+    let mut prev_space = false;
+    for c in replaced.chars() {
+        if c.is_whitespace() {
+            if !prev_space {
+                out.push(' ');
+            }
+            prev_space = true;
+        } else {
+            out.push(c);
+            prev_space = false;
+        }
+    }
+    // Tidy stray spaces before punctuation that a removed tag may have left.
+    out.trim()
+        .replace(" ,", ",")
+        .replace(" .", ".")
+        .replace(" !", "!")
+        .replace(" ?", "?")
+        .trim()
+        .to_string()
+}
+
 pub struct Transcriber {
     ctx: WhisperContext,
 }
@@ -181,7 +228,10 @@ impl Transcriber {
         }
         let t_collect_done = Instant::now();
 
-        let trimmed = text.trim().to_string();
+        // Remove Whisper's non-speech annotations (`[BLANK_AUDIO]`, etc.)
+        // before anything else sees the text — including a mid-sentence pause
+        // that would otherwise litter the transcript.
+        let trimmed = strip_nonspeech_annotations(&text);
 
         // One-line stats per transcribe so the user can share `<app_data>/perf.log`
         // when investigating speed.
@@ -198,8 +248,16 @@ impl Transcriber {
             "[transcribe] audio={audio_seconds:.2}s threads={threads} accuracy={accuracy_mode} state={state_ms}ms full={full_ms}ms collect={collect_ms}ms total={total_ms}ms ratio={realtime_ratio:.2}x"
         ));
 
-        if is_hallucination(&trimmed) {
-            eprintln!("[whisper] discarded suspected hallucination: {trimmed:?}");
+        // Empty after stripping (pure silence / blank audio) or a known
+        // whole-output hallucination → inject nothing. The controller turns an
+        // empty result into the brief "Didn't catch that" HUD hint.
+        if trimmed.is_empty() || is_hallucination(&trimmed) {
+            if !text.trim().is_empty() {
+                perf_log::append(&format!(
+                    "[whisper] dropped non-speech/hallucination output: {:?}",
+                    text.trim()
+                ));
+            }
             return Ok(String::new());
         }
         Ok(trimmed)
