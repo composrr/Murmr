@@ -16,6 +16,20 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.65 — HUD stops disappearing
+
+### Fixed
+
+- **The HUD no longer vanishes after the app's been running a while.** The
+  recording pill lives in a hidden window between dictations, and Windows was
+  progressively throttling and eventually suspending that window's renderer —
+  so after enough idle time it would show nothing when you spoke, and only an
+  app restart (a fresh renderer) brought it back. Murmr now tells the HUD's
+  webview not to background/suspend while hidden and keeps it warm with a
+  steady heartbeat, so it's ready every time.
+
+---
+
 ## v0.1.64 — Smart lists
 
 ### New

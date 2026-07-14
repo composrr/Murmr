@@ -39,6 +39,20 @@ export default function HudApp() {
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
 
+  // Keep-alive: a steady timer so the WebView2 renderer is never treated as
+  // idle and suspended while the HUD window is hidden between dictations.
+  // Paired with the window's anti-backgrounding browser args — together they
+  // stop the "HUD stops appearing until I restart the app" failure, where a
+  // suspended renderer shows nothing when the window is shown again.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      // Trivial work is enough to keep the event loop warm; reference a live
+      // API so it can't be optimized away.
+      void performance.now();
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const unlisteners: UnlistenFn[] = [];

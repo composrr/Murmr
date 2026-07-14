@@ -1245,6 +1245,16 @@ fn create_hud_window(app: &AppHandle) -> Result<WebviewWindow, String> {
         .visible(false)
         .focused(false)
         .shadow(false)
+        // Keep the HUD's WebView2 renderer from being throttled/suspended while
+        // the window is hidden between dictations — otherwise, after enough idle
+        // time, `show()` reveals a frozen webview and the pill never appears
+        // (until an app restart spawns a fresh webview). Mirror the declarative
+        // config's `additionalBrowserArgs`.
+        .additional_browser_args(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+             --disable-background-timer-throttling --disable-renderer-backgrounding \
+             --disable-backgrounding-occluded-windows",
+        )
         .build()
         .map_err(|e| format!("WebviewWindowBuilder build failed: {e}"))?;
     perf_log::append("[hud] recreated successfully");
