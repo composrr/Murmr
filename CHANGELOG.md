@@ -16,6 +16,28 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.66 — Stop pasting the wrong thing; undo the v0.1.65 HUD regression
+
+### Fixed
+
+- **Murmr no longer pastes text from a different app.** Ctrl+V is processed
+  asynchronously — Murmr put your transcript on the clipboard, sent the paste,
+  then restored your previous clipboard 50ms later. A busy app (and everything
+  is busy right after transcription pegs every CPU core) often didn't read the
+  clipboard until *after* that restore, so it pasted whatever had been on your
+  clipboard before — frequently content from another app entirely. The restore
+  now happens on a background thread well after the paste has landed, so what
+  you said is what you get. (Tip: **Advanced → Injection mode →
+  Per-keystroke** skips the clipboard altogether.)
+- **The HUD works again (v0.1.65 regression).** v0.1.65 tried to stop Windows
+  suspending the hidden HUD by giving its webview custom browser args — but
+  WebView2 shares one browser environment across the whole app, so giving a
+  single window different args made its webview fail to initialize: the HUD
+  stopped appearing at all, and restarting no longer helped. Those args are
+  reverted. The keep-alive heartbeat from v0.1.65 stays.
+
+---
+
 ## v0.1.65 — HUD stops disappearing
 
 ### Fixed

@@ -31,6 +31,12 @@ const MOD_KEY: Key = Key::Meta;
 #[cfg(not(target_os = "macos"))]
 const MOD_KEY: Key = Key::Control;
 
+/// How long to wait after synthesizing the paste before restoring the user's
+/// previous clipboard. Must comfortably exceed how long a busy app takes to
+/// actually READ the clipboard after receiving Ctrl+V — otherwise it reads the
+/// restored value and pastes the wrong text. See `inject_clipboard`.
+const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(1200);
+
 /// Inject `text` into the focused app. When `keystroke_mode` is true, type it
 /// character-by-character instead of pasting — the fallback for apps that
 /// ignore a synthesized paste.
@@ -72,14 +78,32 @@ fn inject_clipboard(text: &str) -> Result<(), String> {
     let _ = enigo.key(MOD_KEY, Release);
     v_result.map_err(|e| format!("enigo V: {e}"))?;
 
-    // Wait for the paste to consume the clipboard, then restore — but only
-    // if no one else has overwritten our text in the meantime.
-    thread::sleep(Duration::from_millis(50));
+    // Restore the user's previous clipboard on a BACKGROUND thread after a
+    // generous delay.
+    //
+    // The paste we just synthesized is processed ASYNCHRONOUSLY by the target
+    // app — Ctrl+V only queues the keystroke; the app reads the clipboard
+    // whenever it gets around to it. This used to restore after 50ms, which
+    // lost the race constantly: a busy app (and everything is busy right after
+    // a transcribe just pegged every CPU core) would read the clipboard AFTER
+    // we'd already put the old contents back, and paste the PREVIOUS clipboard
+    // — often text from a completely different app. Waiting ~1.2s makes that
+    // essentially impossible, and doing it off-thread keeps injection snappy.
+    //
+    // The still-ours check stays: if anything else wrote to the clipboard in
+    // the meantime, we leave it alone rather than clobber it.
     if let Some(prior_text) = prior {
-        let still_ours = clipboard.get_text().ok().as_deref() == Some(text);
-        if still_ours {
-            let _ = clipboard.set_text(prior_text);
-        }
+        let ours = text.to_string();
+        std::thread::Builder::new()
+            .name("murmr-clipboard-restore".into())
+            .spawn(move || {
+                thread::sleep(CLIPBOARD_RESTORE_DELAY);
+                let Ok(mut cb) = Clipboard::new() else { return };
+                if cb.get_text().ok().as_deref() == Some(ours.as_str()) {
+                    let _ = cb.set_text(prior_text);
+                }
+            })
+            .ok();
     }
 
     Ok(())
