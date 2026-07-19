@@ -491,6 +491,11 @@ struct PendingPress {
 /// that 80ms window cancels the pending dictation. Push-to-talk loses
 /// 80ms at the start of the recording — a negligible cost for keeping
 /// system shortcuts working.
+///
+/// A quick tap RELEASED inside that 80ms window is NOT lost: on release we
+/// see the press was still pending (no combo key cancelled it) and emit the
+/// deferred `DictationDown` then `DictationUp` right away, so even a very
+/// fast tap registers (and toggles recording on). See the KeyRelease arm.
 pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     crate::perf_log::append(&format!(
         "[hotkey] installing OS keyboard hook (dictation={}, cancel={}, repeat={})",
@@ -732,18 +737,44 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         if dict_released {
                             if dict_main_is_modifier {
                                 // Bare-modifier OR multi-modifier release.
-                                // Only fire DictationUp if the press
-                                // actually committed (passed the 80ms
-                                // threshold without a combo cancelling
-                                // it).
-                                let was_committed = {
+                                //
+                                // Three cases, distinguished by the pending
+                                // state:
+                                //   1. Already committed (held past the ~80ms
+                                //      commit delay) → fire DictationUp; the
+                                //      controller decides tap-vs-hold.
+                                //   2. Still pending, not yet committed → a
+                                //      CLEAN QUICK TAP released before the
+                                //      commit delay with no combo key in
+                                //      between. This used to be dropped
+                                //      entirely, so a fast tap did nothing and
+                                //      the user had to hold the key a beat for
+                                //      it to register. Instead, emit the
+                                //      deferred DictationDown now with the REAL
+                                //      press time, then the DictationUp below —
+                                //      the controller sees a short press and
+                                //      toggles recording on.
+                                //   3. Pending already cleared → a combo
+                                //      (Ctrl+V etc.) cancelled it; fire nothing.
+                                let (was_committed, tap_press_at) = {
                                     let mut pp = pending_for_cb.lock();
-                                    let c = pp.committed;
+                                    let committed = pp.committed;
+                                    // Only treat as a tap if the press is still
+                                    // live (not cancelled by a combo).
+                                    let tap_at = if committed { None } else { pp.pressed_at };
                                     pp.pressed_at = None;
                                     pp.committed = false;
-                                    c
+                                    (committed, tap_at)
                                 };
                                 if was_committed {
+                                    (Some(HotkeyEvent::DictationUp), false)
+                                } else if let Some(press_at) = tap_press_at {
+                                    // Ordered send: DictationDown enqueues here,
+                                    // the returned DictationUp lands on the same
+                                    // channel immediately after.
+                                    let _ = tx_for_cb.send(HotkeyEvent::DictationDown {
+                                        pressed_at: press_at,
+                                    });
                                     (Some(HotkeyEvent::DictationUp), false)
                                 } else {
                                     (None, false)

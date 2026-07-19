@@ -16,6 +16,20 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.72 — Quick taps register instantly
+
+### Improved
+
+- **A quick tap of the dictation hotkey now registers reliably.** When your
+  hotkey is a bare modifier (like Right Ctrl or AltGr), Murmr briefly waits to
+  see whether you're actually starting a shortcut before it reacts — but a very
+  fast tap was falling inside that window and getting dropped, so you had to
+  hold the key a beat for it to catch. A clean quick tap (no other key pressed)
+  is now recognized immediately and toggles recording on. Holds and modifier
+  shortcuts are unchanged.
+
+---
+
 ## v0.1.71 — Fix "Murmr is damaged" on macOS
 
 ### Fixed
