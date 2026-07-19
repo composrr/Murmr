@@ -16,6 +16,19 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.71 — Fix "Murmr is damaged" on macOS
+
+### Fixed
+
+- **macOS: the app no longer reports "'Murmr' is damaged and can't be opened."**
+  A diagnostic log file was being written next to the executable — which on
+  macOS sits inside the signed app bundle — invalidating the code signature so
+  Gatekeeper refused to launch it. That fallback log is now disabled on macOS
+  (it was only ever needed for certain Windows installs), so the signature stays
+  intact. If you hit this on 0.1.70, reinstall from the 0.1.71 `.dmg`.
+
+---
+
 ## v0.1.70 — A waveform that actually moves, a hotkey that stays awake
 
 ### New

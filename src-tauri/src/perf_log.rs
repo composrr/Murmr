@@ -31,10 +31,23 @@ pub fn init(app_data_dir: PathBuf) {
 
     // Compute the fallback path: <dir of murmr.exe>/perf.log. This is the
     // diagnostic-of-last-resort path that always works regardless of
-    // launch-context env var quirks.
+    // launch-context env var quirks (Windows Explorer/Start-menu installs
+    // where %APPDATA% isn't propagated — see module docs).
+    //
+    // NEVER do this on macOS. There the executable lives INSIDE the signed
+    // .app bundle (Contents/MacOS/), so writing a file next to it breaks the
+    // code-signature seal. Gatekeeper then refuses to launch with
+    // "\u{201c}Murmr\u{201d} is damaged and can't be opened" — even though the
+    // app is correctly signed and notarized. The app-data path above is the
+    // correct, always-writable location on macOS, so we leave the fallback
+    // unset there.
+    #[cfg(not(target_os = "macos"))]
     let fallback = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("perf.log")));
+    #[cfg(target_os = "macos")]
+    let fallback: Option<PathBuf> = None;
+
     let _ = FALLBACK_LOG_PATH.set(fallback);
 }
 
