@@ -930,6 +930,12 @@ impl Controller {
             }
         }
 
+        // FINAL z-order assertion — after all positioning, force the HUD to the
+        // very front of the topmost band (without stealing focus). This is what
+        // keeps it from hiding behind another window when it's technically
+        // "shown but not on top."
+        raise_hud_to_front(&hud);
+
         // Tell the HUD's React app "you've just been shown — re-query
         // current state and render the right view." This is a sharper
         // signal than the timed Status::Recording re-emits: even if
@@ -1224,6 +1230,47 @@ fn apply_capture_exclusion(_hud: &tauri::WebviewWindow, _exclude: bool) {
     // macOS equivalent (NSWindow.sharingType = .none) would go here; the HUD
     // is a transparent overlay and is a lower priority on macOS.
 }
+
+/// Force the HUD to the very TOP of the always-on-top band WITHOUT stealing
+/// focus. `set_always_on_top(true)` alone isn't enough: when the topmost flag
+/// is already set it can no-op, so the HUD stays behind other topmost windows
+/// (or a normal window that was raised more recently) — which reads to the
+/// user as "the HUD didn't show up." We re-toggle the flag (cross-platform)
+/// and, on Windows, issue a raw `SetWindowPos(HWND_TOPMOST, …, NOACTIVATE)` to
+/// re-insert it at the front of the band without activating it.
+fn raise_hud_to_front(hud: &tauri::WebviewWindow) {
+    // Toggling off→on forces Tauri to re-apply the topmost state rather than
+    // treat an already-topmost window as a no-op.
+    let _ = hud.set_always_on_top(false);
+    let _ = hud.set_always_on_top(true);
+    raise_hud_topmost_raw(hud);
+}
+
+#[cfg(windows)]
+fn raise_hud_topmost_raw(hud: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    };
+    if let Ok(hwnd) = hud.hwnd() {
+        unsafe {
+            // SWP_NOACTIVATE is the crucial flag — it re-orders z WITHOUT
+            // giving the HUD foreground/focus, so injection still targets the
+            // user's app.
+            let _ = SetWindowPos(
+                hwnd.0 as _,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn raise_hud_topmost_raw(_hud: &tauri::WebviewWindow) {}
 
 /// Build the HUD window from scratch with the same config as
 /// `tauri.conf.json`'s `[windows]` entry. Used when the initial

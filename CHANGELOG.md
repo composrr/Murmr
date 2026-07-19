@@ -16,6 +16,21 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.67 — HUD always on top, for real
+
+### Fixed
+
+- **The HUD no longer hides behind other windows.** A lot of the "HUD didn't
+  show up" reports were actually the pill appearing *behind* the window you
+  were working in. Murmr re-asserted "always on top" on every show, but when
+  that flag was already set the call did nothing — so the HUD stayed behind
+  topmost windows (or a window raised more recently). Murmr now force-raises
+  the HUD to the very front of the always-on-top layer after positioning it,
+  every time it appears — without stealing keyboard focus, so what you type
+  still goes to your app.
+
+---
+
 ## v0.1.66 — Stop pasting the wrong thing; undo the v0.1.65 HUD regression
 
 ### Fixed
