@@ -217,6 +217,50 @@ function loadLocalSigningKey() {
 
 loadLocalSigningKey();
 
+// ---------------------------------------------------------------------------
+// Apple code-signing + notarization creds for LOCAL macOS builds.
+//
+// tauri-bundler reads these from the env to sign (Developer ID) and notarize:
+//   APPLE_SIGNING_IDENTITY  "Developer ID Application: Name (TEAMID)"
+//   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID   (notarization; APPLE_PASSWORD
+//                                                is an app-specific password)
+// Optionally APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD to import a .p12
+// (not needed locally when the identity already lives in the login keychain).
+//
+// We load them from a gitignored `.tauri/apple.env` (KEY=VALUE per line) so a
+// local `npm run tauri build` "just works". CI sets these from GitHub Secrets
+// and never reads this file. Anything already in the environment wins.
+// ---------------------------------------------------------------------------
+function loadLocalAppleCredentials() {
+  if (platform !== 'darwin') return; // Apple signing only applies on macOS
+  const path = join('.tauri', 'apple.env');
+  if (!existsSync(path)) return;
+  let loaded = 0;
+  try {
+    for (const raw of readFileSync(path, 'utf8').split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      // Strip a single pair of surrounding quotes if present.
+      if (val.length >= 2 && ((val[0] === '"' && val.at(-1) === '"') ||
+                              (val[0] === "'" && val.at(-1) === "'"))) {
+        val = val.slice(1, -1);
+      }
+      if (!key || key in env || key in extraEnv) continue; // env wins
+      extraEnv[key] = val;
+      loaded++;
+    }
+    if (loaded) console.log(`[run-tauri] loaded ${loaded} Apple credential var(s) from ${path}`);
+  } catch (e) {
+    console.warn(`[run-tauri] failed to read Apple credentials at ${path}: ${e.message}`);
+  }
+}
+
+loadLocalAppleCredentials();
+
 // (License pubkey loader removed in v0.1.23 — Murmr is free, no key check.)
 
 const PATH = [...newPath, env.PATH].join(platform === 'win32' ? ';' : ':');

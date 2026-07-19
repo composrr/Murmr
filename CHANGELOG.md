@@ -16,6 +16,26 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.69 — Signed, notarized, and auto-updating on Mac
+
+### Improved
+
+- **The Mac app is now code-signed and notarized by Apple.** No more "Murmr
+  is damaged and can't be opened" warning and no more `xattr -cr` Terminal
+  step — just open the `.dmg`, drag Murmr to Applications, and launch it.
+- **Mac now updates itself automatically, like Windows already did.** The
+  auto-updater was previously off on Mac because unsigned rebuilds made macOS
+  forget your Accessibility and Input Monitoring permissions on every update.
+  A stable Apple Developer ID signature fixes that, so updates install in the
+  background and your permissions stick.
+
+> **One-time note for existing Mac users:** updating *to* this version from an
+> older unsigned build changes the app's signature, so you'll need to re-grant
+> Input Monitoring and Accessibility this once. Every update after this keeps
+> them.
+
+---
+
 ## v0.1.68 — Stop clobbering a copied photo
 
 ### Fixed
