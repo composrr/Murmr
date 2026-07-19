@@ -36,18 +36,15 @@ are transcribed locally and typed into whatever app you're focused on.
 ### macOS
 
 1. Download the latest `.dmg` from Releases.
-2. Drag Murmr into `Applications`.
-3. **First launch will be blocked by Gatekeeper** because Murmr is unsigned.
-   Open System Settings → Privacy & Security → scroll down to the "Murmr was
-   blocked" notice → click **Open Anyway**.
-4. macOS will ask for **Microphone** permission and **Accessibility** permission
+2. Drag Murmr into `Applications` and double-click to launch. The macOS app is
+   code-signed and notarized by Apple, so it opens without any Gatekeeper
+   warning or Terminal workaround.
+3. macOS will ask for **Microphone** permission and **Accessibility** permission
    on first dictation. Grant both — Accessibility is required for Murmr to type
    into other apps on your behalf.
 
-> **Why isn't Murmr code-signed?** Signing certificates cost money and lock the
-> project to specific Apple/Microsoft developer programs. We may revisit after
-> the project sees adoption — for now the one-click "trust this app" dance is
-> documented above.
+> **Note:** the macOS build is signed with an Apple Developer ID; the Windows
+> build is still unsigned (SmartScreen "More info → Run anyway" on first launch).
 
 ---
 

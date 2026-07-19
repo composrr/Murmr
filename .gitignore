@@ -32,6 +32,13 @@ Thumbs.db
 .tauri/updater.key
 .tauri/*.key
 
+# Apple code-signing + notarization credentials for LOCAL builds. The build
+# wrapper (scripts/run-tauri.mjs) auto-loads APPLE_* vars from this file so
+# `npm run tauri build` signs + notarizes without exporting env vars by hand.
+# NEVER commit — holds the app-specific password + .p12 password. CI uses
+# GitHub Secrets instead, not this file.
+.tauri/apple.env
+
 # License key signing — private key NEVER committed. The matching public
 # key (license-pub.key) IS safe to commit but we keep both side-by-side
 # to make the threat model obvious. CI gets the pubkey from a repo

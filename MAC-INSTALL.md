@@ -1,12 +1,12 @@
 # Installing Murmr on macOS
 
-Murmr is a free side project — there's no Apple Developer account behind it,
-which means installing it takes a couple of extra steps the first time.
-None of them are dangerous; they're hoops macOS makes you jump through for
-any unsigned app. Once you've done them, future updates install themselves
-automatically through Murmr's built-in updater.
+Murmr is code-signed and notarized by Apple, so it installs like any normal
+Mac app — no Terminal commands, no Gatekeeper workarounds. The only thing
+that takes a moment is granting the three macOS permissions Murmr needs to
+do its job. Once installed, future updates install themselves automatically
+through Murmr's built-in updater.
 
-This whole walkthrough takes about 90 seconds.
+This whole walkthrough takes about 60 seconds.
 
 ---
 
@@ -23,32 +23,12 @@ with **Intel** in the name → x64.
 
 ---
 
-## 2. Install — and clear the "damaged" warning
+## 2. Install
 
-Open the downloaded `.dmg` and drag **Murmr** into your **Applications** folder.
-
-If you double-click Murmr now, macOS will probably show:
-
-> **"Murmr is damaged and can't be opened. You should move it to the Trash."**
-
-It's not damaged. macOS adds an invisible "quarantine" tag to anything a
-browser downloads, and Gatekeeper rejects unsigned apps that have it.
-Removing the tag is one Terminal command.
-
-Open **Terminal** (Spotlight → "terminal" → Enter), paste this exactly, and
-press Enter:
-
-```
-xattr -cr /Applications/Murmr.app
-```
-
-Done. Now double-click Murmr in Applications. It opens.
-
-> **Why this is safe:** `xattr -cr` only strips macOS's quarantine flag from
-> the file you point it at. It doesn't grant any permissions, doesn't reach
-> the network, and doesn't modify the app itself. Every unsigned indie Mac
-> app needs this; it's the workaround for not paying Apple's $99/year
-> developer fee.
+Open the downloaded `.dmg` and drag **Murmr** into your **Applications**
+folder. Then double-click Murmr in Applications — it opens straight away.
+Because the app is notarized, Gatekeeper recognizes it and won't show the
+"damaged" or "unidentified developer" warnings that unsigned apps trigger.
 
 ---
 
@@ -125,8 +105,8 @@ Each pane has Murmr listed with a toggle.
 Once installed, Murmr updates itself. Click the version number in
 **Settings → General → "Check for updates"**, or wait for the periodic
 auto-check. Updates download in the background and apply on the next quit.
-You won't have to repeat any of this — the quarantine flag and permissions
-only matter on first install.
+Because updates are signed with the same Apple Developer ID, your granted
+permissions carry over — you won't have to repeat any of this.
 
 ---
 
