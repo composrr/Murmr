@@ -434,3 +434,24 @@ export function listenStatus(handler: (status: DictationStatus) => void): Promis
 export function listenTranscriptionSaved(handler: () => void): Promise<UnlistenFn> {
   return listen<null>('murmr:transcription-saved', () => handler());
 }
+
+// ----- License -----
+// Offline Ed25519 license verification. `kind` values match the Rust
+// LicenseStatus enum (serde kebab-case). Enforcement is currently off (see
+// LICENSE_ENFORCED in lib/license.ts) — these still work so a key can be
+// entered/validated for display.
+
+export type LicenseStatus =
+  | { kind: 'missing' }
+  | { kind: 'malformed'; reason: string }
+  | { kind: 'bad-signature' }
+  | { kind: 'expired'; email: string; expired_at: string }
+  | { kind: 'valid'; email: string; tier: string | null; expires_at: string | null };
+
+export function getLicenseStatus(): Promise<LicenseStatus> {
+  return invoke<LicenseStatus>('license_status');
+}
+
+export function setLicenseKey(key: string): Promise<LicenseStatus> {
+  return invoke<LicenseStatus>('set_license_key', { key });
+}

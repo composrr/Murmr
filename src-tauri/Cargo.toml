@@ -42,6 +42,12 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# License-key verification: Ed25519-signed offline license blobs
+# (`<payload>.<signature>`, base64url). See src/license/mod.rs. Enforcement
+# is currently off (the app is free) — this is the mechanism, ready to gate.
+ed25519-dalek = "2"
+base64 = "0.22"
+
 # Audio capture + processing
 cpal = "0.15"
 rubato = "0.16"

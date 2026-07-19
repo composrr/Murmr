@@ -5,6 +5,7 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
+mod license;
 mod notifications;
 mod perf_log;
 mod permissions;
@@ -314,6 +315,29 @@ fn delete_dictionary_entry(id: i64, state: State<'_, AppState>) -> Result<(), St
 #[tauri::command]
 fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.get()
+}
+
+// ----- License -----
+// Offline Ed25519 license verification. Enforcement is OFF right now (the
+// app is free) — these commands expose status so a Settings panel can let a
+// user enter/see a key, and so the gate can be flipped on later without any
+// backend change. See `src/windows/main/App.tsx` (LICENSE_ENFORCED).
+
+#[tauri::command]
+fn license_status(state: State<'_, AppState>) -> license::LicenseStatus {
+    let key = state.settings.get().license_key;
+    license::validate(&key, &license::now_iso_z())
+}
+
+#[tauri::command]
+fn set_license_key(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<license::LicenseStatus, String> {
+    let mut s = state.settings.get();
+    s.license_key = key.trim().to_string();
+    state.settings.replace(s)?;
+    Ok(license_status(state))
 }
 
 #[tauri::command]
@@ -1192,6 +1216,8 @@ pub fn run() {
             delete_dictionary_entry,
             get_settings,
             save_settings,
+            license_status,
+            set_license_key,
             list_input_devices,
             app_paths,
             open_app_data_folder,

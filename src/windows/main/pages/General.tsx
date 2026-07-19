@@ -18,6 +18,7 @@ import {
   type TranscriptionResult,
 } from '../../../lib/ipc';
 import type { Theme } from '../../../lib/theme';
+import LicensePanel from './LicensePanel';
 
 const THEMES: Theme[] = ['light', 'dark', 'auto'];
 const RECORD_SECONDS = 4;
@@ -311,6 +312,8 @@ export default function General() {
           Total transcriptions stored: <span className="tabular-nums">{count ?? '—'}</span>
         </p>
       </div>
+
+      <LicensePanel />
     </div>
   );
 }

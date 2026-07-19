@@ -18,6 +18,12 @@ pub struct Settings {
     pub appearance: String,
     pub launch_at_login: bool,
 
+    /// Signed license key, base64url `<payload>.<signature>`. Empty = none.
+    /// Verified offline against the build-time public key (see
+    /// `license::validate`). Enforcement is currently a no-op — the app is
+    /// free — but the key is stored so the gate can be switched on later.
+    pub license_key: String,
+
     pub microphone_device: Option<String>,
     pub microphone_gain_db: f32,
     pub noise_suppression: bool,
@@ -188,6 +194,7 @@ impl Default for Settings {
         Self {
             appearance: "auto".into(),
             launch_at_login: false,
+            license_key: String::new(),
 
             microphone_device: None,
             microphone_gain_db: 0.0,

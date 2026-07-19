@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { ping } from '../../lib/ipc';
+import { getLicenseStatus, ping, type LicenseStatus } from '../../lib/ipc';
+import { LICENSE_ENFORCED } from '../../lib/license';
+import Paywall from './Paywall';
 import { useTheme } from '../../hooks/useTheme';
 import { UpdaterProvider, useSharedUpdater } from '../../hooks/UpdaterContext';
 import ReleaseNotes from './ReleaseNotes';
@@ -30,6 +32,19 @@ export default function App() {
 function AppBody() {
   useTheme();
   const [version, setVersion] = useState('0.1.0');
+
+  // License gate. While LICENSE_ENFORCED is false (Murmr is free), we seed a
+  // synthetic "valid" status so the gate below never fires and we never even
+  // call the backend. Flip LICENSE_ENFORCED to true to turn the Paywall on.
+  const [license, setLicense] = useState<LicenseStatus | null>(
+    LICENSE_ENFORCED ? null : { kind: 'valid', email: '', tier: null, expires_at: null },
+  );
+  useEffect(() => {
+    if (!LICENSE_ENFORCED) return;
+    getLicenseStatus()
+      .then(setLicense)
+      .catch((e) => setLicense({ kind: 'malformed', reason: String(e) }));
+  }, []);
   const { state: updateState, installNow, dismiss } = useSharedUpdater();
   const [bannerDismissed, setBannerDismissed] = useState(false);
   // "What's new" modal — opened from the update banner or from any other
@@ -99,6 +114,13 @@ function AppBody() {
       updateState.kind === 'downloading' ||
       updateState.kind === 'ready' ||
       updateState.kind === 'error');
+
+  // Gate (only reachable when LICENSE_ENFORCED): wait for the check, then
+  // show the Paywall in place of the app until a valid key is entered.
+  if (LICENSE_ENFORCED && license === null) return null; // still checking
+  if (LICENSE_ENFORCED && license && license.kind !== 'valid') {
+    return <Paywall status={license} onLicensed={setLicense} />;
+  }
 
   return (
     <HashRouter>

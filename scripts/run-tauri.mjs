@@ -261,7 +261,40 @@ function loadLocalAppleCredentials() {
 
 loadLocalAppleCredentials();
 
-// (License pubkey loader removed in v0.1.23 — Murmr is free, no key check.)
+// ---------------------------------------------------------------------------
+// License-validation public key — baked into the binary via the
+// MURMR_LICENSE_PUBKEY build env var (read by option_env! in
+// src-tauri/src/license/mod.rs). Generated once with
+// `node scripts/issue-license.mjs --init`, which writes the matching private
+// key to .keys/license-priv.key (gitignored). The public key at
+// .keys/license-pub.key IS committed, so both local and CI builds bake it in
+// automatically — no secret needed. If it's absent the binary still builds,
+// but every license key is rejected (which is fine while enforcement is off).
+// ---------------------------------------------------------------------------
+function loadLocalLicensePubkey() {
+  if (env.MURMR_LICENSE_PUBKEY) return; // explicit override (CI / shell)
+  const path = join('.keys', 'license-pub.key');
+  if (!existsSync(path)) {
+    console.warn(
+      '[run-tauri] no .keys/license-pub.key — license validation will reject all keys.',
+    );
+    console.warn(
+      '[run-tauri] Run `node scripts/issue-license.mjs --init` to generate one.',
+    );
+    return;
+  }
+  try {
+    const key = readFileSync(path, 'utf8').trim();
+    if (key) {
+      extraEnv.MURMR_LICENSE_PUBKEY = key;
+      console.log(`[run-tauri] baked license pubkey from ${path}`);
+    }
+  } catch (e) {
+    console.warn(`[run-tauri] failed to read license pubkey: ${e.message}`);
+  }
+}
+
+loadLocalLicensePubkey();
 
 const PATH = [...newPath, env.PATH].join(platform === 'win32' ? ';' : ':');
 
