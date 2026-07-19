@@ -15,6 +15,7 @@ import {
   Row,
   SettingsHeader,
 } from './settings-ui';
+import { createLevelNormalizer } from '../../../lib/waveform';
 
 const WAVEFORM_BARS = 25;
 
@@ -32,6 +33,7 @@ export default function Microphone() {
   >({ kind: 'idle' });
   const [rms, setRms] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
   const tickRef = useRef<number | null>(null);
+  const normalizerRef = useRef(createLevelNormalizer());
 
   useEffect(() => {
     listInputDevices().then(setDevices).catch(() => {});
@@ -41,9 +43,10 @@ export default function Microphone() {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     listen<number>('murmr:audio-rms', (event) => {
+      const level = normalizerRef.current.push(event.payload);
       setRms((prev) => {
         const next = prev.slice(1);
-        next.push(event.payload);
+        next.push(level);
         return next;
       });
     }).then((u) => (unlisten = u));
@@ -65,6 +68,7 @@ export default function Microphone() {
 
   const startTest = async () => {
     setTest({ kind: 'recording', remaining: TEST_SECONDS });
+    normalizerRef.current.reset();
     setRms(Array(WAVEFORM_BARS).fill(0));
     tickRef.current = window.setInterval(() => {
       setTest((prev) =>
@@ -102,7 +106,7 @@ export default function Microphone() {
     <div className="max-w-[640px]">
       <SettingsHeader
         title="Microphone"
-        subtitle="Pick the input device, set gain, test the mic."
+        subtitle="Pick the input device and test the mic."
       />
 
       <Row name="Input device" hint="Murmr captures from this microphone">
@@ -112,24 +116,6 @@ export default function Microphone() {
           options={deviceOptions}
           disabled={!settings}
         />
-      </Row>
-
-      <Row name="Input gain" hint="-12 dB to +12 dB. Wired in Phase 9.">
-        <div className="flex items-center gap-3 w-[260px]">
-          <input
-            type="range"
-            min={-12}
-            max={12}
-            step={0.5}
-            value={settings?.microphone_gain_db ?? 0}
-            onChange={(e) => update({ microphone_gain_db: parseFloat(e.target.value) })}
-            disabled={!settings}
-            className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
-          />
-          <span className="text-[12px] text-text-tertiary tabular-nums w-[44px] text-right">
-            {(settings?.microphone_gain_db ?? 0).toFixed(1)} dB
-          </span>
-        </div>
       </Row>
 
       {/* Noise suppression — removed for now. The toggle was cosmetic; we
@@ -208,7 +194,7 @@ export default function Microphone() {
               </div>
               <div className="flex items-end gap-[2px] h-[24px]">
                 {rms.map((value, i) => {
-                  const norm = Math.min(1, value / 0.4);
+                  const norm = Math.min(1, Math.max(0, value));
                   const height = test.kind === 'recording' ? 4 + norm * 20 : 4;
                   const opacity = test.kind === 'recording' ? 0.5 + norm * 0.45 : 0.25;
                   return (

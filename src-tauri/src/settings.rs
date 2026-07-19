@@ -19,7 +19,6 @@ pub struct Settings {
     pub launch_at_login: bool,
 
     pub microphone_device: Option<String>,
-    pub microphone_gain_db: f32,
     pub noise_suppression: bool,
 
     /// How aggressively to lower per-app audio sessions while recording.
@@ -190,7 +189,6 @@ impl Default for Settings {
             launch_at_login: false,
 
             microphone_device: None,
-            microphone_gain_db: 0.0,
             noise_suppression: false,
 
             audio_duck_amount: 0.8,

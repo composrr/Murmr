@@ -7,6 +7,7 @@ import {
 } from '../../../lib/ipc';
 import StepFrame from './StepFrame';
 import type { StepProps } from '../App';
+import { createLevelNormalizer } from '../../../lib/waveform';
 
 const TEST_SECONDS = 3;
 const WAVEFORM_BARS = 31;
@@ -22,6 +23,7 @@ export default function MicTest(props: StepProps) {
   const [error, setError] = useState<string | null>(null);
   const [rms, setRms] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
   const tickRef = useRef<number | null>(null);
+  const normalizerRef = useRef(createLevelNormalizer());
 
   useEffect(() => {
     listInputDevices().then(setDevices).catch(() => {});
@@ -30,9 +32,10 @@ export default function MicTest(props: StepProps) {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     listen<number>('murmr:audio-rms', (event) => {
+      const level = normalizerRef.current.push(event.payload);
       setRms((prev) => {
         const next = prev.slice(1);
-        next.push(event.payload);
+        next.push(level);
         return next;
       });
     }).then((u) => (unlisten = u));
@@ -50,6 +53,7 @@ export default function MicTest(props: StepProps) {
     setSeconds(TEST_SECONDS);
     setTranscript('');
     setError(null);
+    normalizerRef.current.reset();
     setRms(Array(WAVEFORM_BARS).fill(0));
     tickRef.current = window.setInterval(() => {
       setSeconds((s) => {
@@ -172,7 +176,7 @@ function Waveform({ rms, active }: { rms: number[]; active: boolean }) {
   return (
     <div className="flex items-end gap-[3px] h-[36px]">
       {rms.map((value, i) => {
-        const norm = Math.min(1, value / 0.4);
+        const norm = Math.min(1, Math.max(0, value));
         const height = active ? 5 + norm * 31 : 5;
         const opacity = active ? 0.5 + norm * 0.45 : 0.22;
         return (

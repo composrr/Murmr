@@ -206,7 +206,6 @@ export interface Settings {
   appearance: string;
   launch_at_login: boolean;
   microphone_device: string | null;
-  microphone_gain_db: number;
   noise_suppression: boolean;
   /** 0.0–1.0 — amount to dim system master volume while recording.
    * 0 disables ducking. Default 0.3. */

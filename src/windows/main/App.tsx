@@ -14,6 +14,7 @@ import Microphone from './pages/Microphone';
 import Hotkeys from './pages/Hotkeys';
 import Preferences from './pages/Preferences';
 import Advanced from './pages/Advanced';
+import Permissions from './pages/Permissions';
 
 export default function App() {
   // Wrap the actual app body in UpdaterProvider so the banner and Settings
@@ -126,6 +127,7 @@ function AppBody() {
               <Route path="/general" element={<General />} />
               <Route path="/microphone" element={<Microphone />} />
               <Route path="/hotkeys" element={<Hotkeys />} />
+              <Route path="/permissions" element={<Permissions />} />
               <Route path="/preferences" element={<Preferences />} />
               <Route path="/advanced" element={<Advanced />} />
               <Route path="*" element={<Navigate to="/" replace />} />

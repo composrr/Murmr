@@ -9,6 +9,7 @@ import {
   setPracticeMode,
 } from '../../../lib/ipc';
 import { displayName } from '../../main/pages/HotkeyCapture';
+import { createLevelNormalizer } from '../../../lib/waveform';
 
 const TEST_SECONDS = 5;
 const WAVEFORM_BARS = 31;
@@ -28,6 +29,7 @@ export default function Practice(props: StepProps) {
   }, []);
   const tickRef = useRef<number | null>(null);
   const buttonBusyRef = useRef(false);
+  const normalizerRef = useRef(createLevelNormalizer());
 
   // Practice mode = transcription is emitted to the UI but never pasted /
   // saved. Toggle it on while this step is mounted.
@@ -52,6 +54,7 @@ export default function Practice(props: StepProps) {
       if (cancelled) return;
       if (status.kind === 'recording') {
         setPhase('recording');
+        normalizerRef.current.reset();
         setRms(Array(WAVEFORM_BARS).fill(0));
       } else if (status.kind === 'transcribing') {
         setPhase('transcribing');
@@ -70,9 +73,10 @@ export default function Practice(props: StepProps) {
 
     listen<number>('murmr:audio-rms', (event) => {
       if (cancelled) return;
+      const level = normalizerRef.current.push(event.payload);
       setRms((prev) => {
         const next = prev.slice(1);
-        next.push(event.payload);
+        next.push(level);
         return next;
       });
     }).then((u) => {
@@ -95,6 +99,7 @@ export default function Practice(props: StepProps) {
     buttonBusyRef.current = true;
     setPhase('recording');
     setSeconds(TEST_SECONDS);
+    normalizerRef.current.reset();
     setRms(Array(WAVEFORM_BARS).fill(0));
     tickRef.current = window.setInterval(() => {
       setSeconds((s) => {
@@ -213,7 +218,7 @@ function Waveform({ rms, active }: { rms: number[]; active: boolean }) {
   return (
     <div className="flex items-end gap-[3px] h-[28px]">
       {rms.map((value, i) => {
-        const norm = Math.min(1, value / 0.4);
+        const norm = Math.min(1, Math.max(0, value));
         const height = active ? 4 + norm * 24 : 4;
         const opacity = active ? 0.5 + norm * 0.45 : 0.22;
         return (

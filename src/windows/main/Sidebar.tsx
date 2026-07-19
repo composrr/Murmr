@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import type { ComponentType, SVGProps } from 'react';
+import { isMac } from '../../lib/ipc';
 
 interface NavItem {
   to: string;
@@ -68,6 +69,12 @@ const AdvancedIcon = (p: SVGProps<SVGSVGElement>) => (
     <polyline points="8 6 2 12 8 18" />
   </svg>
 );
+const PermissionsIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...ICON_PROPS} {...p}>
+    <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" />
+    <path d="M9.5 12l1.8 1.8L15 10" />
+  </svg>
+);
 
 const TOP: NavItem[] = [
   { to: '/', label: 'Home', Icon: HomeIcon },
@@ -79,6 +86,9 @@ const BOTTOM: NavItem[] = [
   { to: '/general', label: 'General', Icon: GeneralIcon },
   { to: '/microphone', label: 'Microphone', Icon: MicIcon },
   { to: '/hotkeys', label: 'Hotkeys', Icon: HotkeysIcon },
+  // macOS-only: the three TCC permissions Murmr needs. Windows/Linux don't
+  // gate these, so the panel (and this entry) only appear on macOS.
+  ...(isMac() ? [{ to: '/permissions', label: 'Permissions', Icon: PermissionsIcon }] : []),
   { to: '/preferences', label: 'Preferences', Icon: PreferencesIcon },
   { to: '/advanced', label: 'Advanced', Icon: AdvancedIcon },
 ];

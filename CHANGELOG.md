@@ -16,6 +16,33 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.70 — A waveform that actually moves, a hotkey that stays awake
+
+### New
+
+- **Permissions panel in Settings (macOS).** A new *Permissions* section shows
+  the three system permissions Murmr needs — Microphone, Input Monitoring, and
+  Accessibility — each as its own tappable card with a green check when it's on.
+  Anything still missing opens the exact System Settings page for you, so you
+  can see at a glance whether you're fully set up and fix what isn't.
+
+### Improved
+
+- **The live waveform responds to your voice again.** The recording bars now
+  adapt to your microphone's actual level instead of assuming a fixed loudness,
+  so they move naturally whether you're on a quiet built-in laptop mic or a loud
+  desktop one — on both Mac and Windows.
+
+### Fixed
+
+- **The dictation hotkey no longer goes dead after a while on macOS.** If macOS
+  temporarily disabled Murmr's global key listener, it stayed off until you
+  restarted the app — the cause of having to press the hotkey two or three times
+  to get it to catch. It now re-arms itself automatically.
+- Removed a microphone "input gain" slider that never actually affected the audio.
+
+---
+
 ## v0.1.69 — Signed, notarized, and auto-updating on Mac
 
 ### Improved

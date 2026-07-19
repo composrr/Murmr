@@ -9,6 +9,7 @@ import {
 import Recording from './Recording';
 import Thinking from './Thinking';
 import ResultPopup from './ResultPopup';
+import { createLevelNormalizer } from '../../lib/waveform';
 
 /// Which elements of the recording pill to show. Mirrors the two
 /// `hud_show_*` Settings toggles. Defaults here are the safe "show it"
@@ -38,6 +39,9 @@ export default function HudApp() {
   const [display, setDisplay] = useState<HudDisplay>(DEFAULT_HUD_DISPLAY);
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
+  // Adaptive mic-level normalizer: maps raw RMS to [0,1] display levels that
+  // fill the waveform's range regardless of how loud the device runs.
+  const normalizerRef = useRef(createLevelNormalizer());
 
   // Keep-alive: a steady timer so the WebView2 renderer is never treated as
   // idle and suspended while the HUD window is hidden between dictations.
@@ -58,6 +62,7 @@ export default function HudApp() {
     const unlisteners: UnlistenFn[] = [];
 
     const resetCounters = () => {
+      normalizerRef.current.reset();
       setRmsHistory(Array(WAVEFORM_BARS).fill(0));
     };
 
@@ -112,12 +117,12 @@ export default function HudApp() {
 
     const onRms = (event: { payload: number }) => {
       if (cancelled) return;
-      const rms = event.payload;
+      const level = normalizerRef.current.push(event.payload);
 
-      // Update the live waveform.
+      // Update the live waveform with the normalized [0,1] display level.
       setRmsHistory((prev) => {
         const next = prev.slice(1);
-        next.push(rms);
+        next.push(level);
         return next;
       });
     };

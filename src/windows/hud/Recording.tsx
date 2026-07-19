@@ -44,9 +44,10 @@ export default function Recording({
       {showWaveform && (
         <div className="flex items-end gap-[2px] h-[18px]">
           {rms.map((value, i) => {
-            // Map RMS [0..0.4] → bar height [3..18px], opacity [0.5..0.95].
-            // Speech RMS rarely exceeds 0.4 even on loud passages.
-            const norm = Math.min(1, value / 0.4);
+            // `value` is an already-normalized [0,1] level from the adaptive
+            // normalizer (see lib/waveform.ts). Map it to bar height
+            // [3..18px] and opacity [0.5..0.95].
+            const norm = Math.min(1, Math.max(0, value));
             const height = 3 + norm * 15;
             const opacity = 0.5 + norm * 0.45;
             return (
