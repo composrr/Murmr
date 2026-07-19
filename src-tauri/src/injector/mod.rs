@@ -20,11 +20,20 @@
 use std::thread;
 use std::time::Duration;
 
-use arboard::Clipboard;
+use arboard::{Clipboard, ImageData};
 use enigo::{
     Direction::{Click, Press, Release},
     Enigo, Key, Keyboard, Settings,
 };
+
+/// A snapshot of the user's clipboard taken before we overwrite it, so we can
+/// put it back afterward. Covers text AND images — the previous version only
+/// snapshotted text, so dictating while a photo (or other image) was on the
+/// clipboard permanently replaced it with the transcript.
+enum PriorClipboard {
+    Text(String),
+    Image(ImageData<'static>),
+}
 
 #[cfg(target_os = "macos")]
 const MOD_KEY: Key = Key::Meta;
@@ -53,7 +62,15 @@ pub fn inject_text(text: &str, keystroke_mode: bool) -> Result<(), String> {
 
 fn inject_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| format!("clipboard open: {e}"))?;
-    let prior = clipboard.get_text().ok();
+
+    // Snapshot whatever is currently on the clipboard so we can restore it.
+    // Text first; if there's no text, check for an image (a copied photo /
+    // screenshot). Without the image case, dictating while a photo is on the
+    // clipboard would wipe it out and leave the transcript there for good.
+    let prior: Option<PriorClipboard> = match clipboard.get_text().ok() {
+        Some(t) => Some(PriorClipboard::Text(t)),
+        None => clipboard.get_image().ok().map(PriorClipboard::Image),
+    };
 
     clipboard
         .set_text(text.to_string())
@@ -92,15 +109,25 @@ fn inject_clipboard(text: &str) -> Result<(), String> {
     //
     // The still-ours check stays: if anything else wrote to the clipboard in
     // the meantime, we leave it alone rather than clobber it.
-    if let Some(prior_text) = prior {
+    if let Some(prior) = prior {
         let ours = text.to_string();
         std::thread::Builder::new()
             .name("murmr-clipboard-restore".into())
             .spawn(move || {
                 thread::sleep(CLIPBOARD_RESTORE_DELAY);
                 let Ok(mut cb) = Clipboard::new() else { return };
+                // Only restore if the clipboard is still OUR transcript — i.e.
+                // nothing else was copied in the meantime (in which case we
+                // leave the user's newer content alone).
                 if cb.get_text().ok().as_deref() == Some(ours.as_str()) {
-                    let _ = cb.set_text(prior_text);
+                    match prior {
+                        PriorClipboard::Text(t) => {
+                            let _ = cb.set_text(t);
+                        }
+                        PriorClipboard::Image(img) => {
+                            let _ = cb.set_image(img);
+                        }
+                    }
                 }
             })
             .ok();

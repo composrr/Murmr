@@ -16,6 +16,25 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.68 — Stop clobbering a copied photo
+
+### Fixed
+
+- **Dictating no longer wipes a photo (or other image) off your clipboard.**
+  Murmr briefly puts your transcript on the clipboard to paste it, then
+  restores what was there before — but it only ever saved/​restored *text*.
+  If you'd just copied an image (a screenshot, a "share" that copies a photo),
+  there was no text to save, so nothing got restored and the transcript
+  replaced your image permanently. Murmr now snapshots and restores images
+  too, so what you had copied survives a dictation.
+
+  _Note:_ copied **files** (and other non-text/non-image formats) still can't
+  be preserved through a clipboard paste — switch **Advanced → Injection mode
+  → Per-keystroke** if you frequently dictate while files are on your
+  clipboard; that mode never touches the clipboard at all.
+
+---
+
 ## v0.1.67 — HUD always on top, for real
 
 ### Fixed
