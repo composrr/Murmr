@@ -104,6 +104,19 @@ jobs:
           if (-not (Select-String -Path bench.txt -Pattern 'backend=CPU' -Quiet)) { throw 'expected CPU fallback on a GPU-less runner' }
         shell: pwsh
 
+      # Raw exe + runtime DLLs, for running `murmr.exe --murmr-bench` on a
+      # GPU machine without installing.
+      - name: Upload raw exe (bench)
+        uses: actions/upload-artifact@v4
+        with:
+          name: murmr-windows-x64-exe
+          path: |
+            src-tauri/target/release/murmr.exe
+            src-tauri/target/release/vulkan-1.dll
+            src-tauri/target/release/vcomp140.dll
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
