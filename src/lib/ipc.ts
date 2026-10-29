@@ -285,6 +285,11 @@ export interface Settings {
   // ---- Edit-last ----
   /** rdev key name for the "edit & re-inject last transcript" hotkey. Empty = disabled. */
   edit_last_hotkey: string;
+
+  // ---- Engine (session A) ----
+  /** Drop silent stretches with Silero VAD before decoding. Default true. */
+  vad_enabled: boolean;
+  // ---- end engine block ----
 }
 
 export function getSettings(): Promise<Settings> {
@@ -433,3 +438,82 @@ export function listenStatus(handler: (status: DictationStatus) => void): Promis
 export function listenTranscriptionSaved(handler: () => void): Promise<UnlistenFn> {
   return listen<null>('murmr:transcription-saved', () => handler());
 }
+
+// ---- Engine (session A): compute backend, model download, hot-swap ----
+
+export interface BackendInfo {
+  /** "Vulkan" | "Metal" | "CPU" */
+  kind: string;
+  device: string | null;
+}
+
+export interface EngineStatus {
+  /** Model file actually loaded (may differ from the setting after a fallback). */
+  model_name: string;
+  backend: BackendInfo;
+  /** A usable GPU exists on this machine. */
+  gpu_available: boolean;
+  /** The one-time GPU check is still running. */
+  gpu_pending: boolean;
+  gpu_device: string | null;
+  /** Why the GPU isn't in use, when it isn't. */
+  gpu_note: string | null;
+  /** A restart is needed for the GPU setting to take effect. */
+  restart_required: boolean;
+  vad_active: boolean;
+  /** Name of the model being loaded, while a hot-swap is in progress. */
+  loading: string | null;
+  last_error: string | null;
+}
+
+export interface CatalogModel {
+  file: string;
+  label: string;
+  description: string;
+  size_bytes: number;
+  downloaded: boolean;
+}
+
+export interface ModelDownloadProgress {
+  file: string;
+  downloaded: number;
+  total: number;
+  state: 'downloading' | 'verifying' | 'done' | 'error' | 'cancelled';
+  error: string | null;
+}
+
+export function engineStatus(): Promise<EngineStatus> {
+  return invoke<EngineStatus>('engine_status');
+}
+
+export function modelCatalog(): Promise<CatalogModel[]> {
+  return invoke<CatalogModel[]>('model_catalog');
+}
+
+/** Resolves once the model is downloaded and checksum-verified. */
+export function downloadModel(file: string): Promise<void> {
+  return invoke<void>('download_model', { file });
+}
+
+export function cancelModelDownload(): Promise<void> {
+  return invoke<void>('cancel_model_download');
+}
+
+export function deleteModel(file: string): Promise<void> {
+  return invoke<void>('delete_model', { file });
+}
+
+export function retryGpuDetection(): Promise<void> {
+  return invoke<void>('retry_gpu_detection');
+}
+
+export function listenEngineStatus(handler: (s: EngineStatus) => void): Promise<UnlistenFn> {
+  return listen<EngineStatus>('murmr:engine-status', (event) => handler(event.payload));
+}
+
+export function listenModelDownload(
+  handler: (p: ModelDownloadProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<ModelDownloadProgress>('murmr:model-download', (event) => handler(event.payload));
+}
+// ---- end engine block ----

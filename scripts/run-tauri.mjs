@@ -107,6 +107,19 @@ function findLibClang() {
   return null;
 }
 
+// Engine (session A): newest Vulkan SDK install (folder per version).
+function findVulkanSdk() {
+  const roots = ['C:\\VulkanSDK', join(homedir(), 'VulkanSDK')];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    const versions = readdirSync(root)
+      .filter((v) => existsSync(join(root, v, 'Bin', 'glslc.exe')))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    if (versions.length) return join(root, versions[0]);
+  }
+  return null;
+}
+
 const newPath = [];
 const extraEnv = {};
 
@@ -165,6 +178,23 @@ if (platform === 'win32') {
       console.log(`[run-tauri] adding MSVC bin to PATH: ${msvc}`);
     }
   }
+  // ---- Engine (session A): Vulkan SDK for the Windows GPU backend ----
+  // whisper-rs's `vulkan` feature needs VULKAN_SDK (headers, vulkan-1.lib,
+  // glslc). Discover the newest LunarG SDK under C:\VulkanSDK or
+  // %USERPROFILE%\VulkanSDK when the env var isn't set.
+  if (!env.VULKAN_SDK) {
+    const sdk = findVulkanSdk();
+    if (sdk) {
+      extraEnv.VULKAN_SDK = sdk;
+      newPath.push(join(sdk, 'Bin'));
+      console.log(`[run-tauri] setting VULKAN_SDK=${sdk}`);
+    } else {
+      console.warn(
+        '[run-tauri] Vulkan SDK not found. Install it from https://vulkan.lunarg.com/sdk/home#windows (whisper-rs-sys needs it for the GPU build).',
+      );
+    }
+  }
+  // ---- end engine block ----
   // bindgen (used by whisper-rs-sys) needs libclang.dll. Prefer an existing
   // LIBCLANG_PATH; otherwise discover the standard LLVM install.
   if (!env.LIBCLANG_PATH) {

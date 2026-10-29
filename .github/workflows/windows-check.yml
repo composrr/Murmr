@@ -1,0 +1,113 @@
+name: Windows compile check
+
+# Build-only validation for the Windows GPU (Vulkan) build, mirroring the
+# release workflow's Windows job. Runs on pushes to `win-check/**` branches
+# and on demand. Also smoke-tests the built exe on the GitHub runner, which has
+# NO GPU — proving the "no usable GPU → clean CPU fallback" path: the GPU
+# check must report no device (exit code 2), and a real transcription must
+# succeed on CPU. Does not sign or release anything.
+
+on:
+  push:
+    branches:
+      - 'win-check/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compile:
+    name: Compile Windows x64 (Vulkan)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: windows-check-vulkan
+
+      - name: Install LLVM (Windows)
+        run: choco install -y llvm
+        shell: pwsh
+      - name: Set LIBCLANG_PATH (Windows)
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Install Vulkan SDK
+        run: |
+          $ver = '1.4.341.0'
+          curl.exe -sSfL -o vksdk.exe "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkansdk-windows-X64-$ver.exe"
+          Start-Process .\vksdk.exe -ArgumentList '--root',"C:\VulkanSDK\$ver",'--accept-licenses','--default-answer','--confirm-command','install' -Wait -NoNewWindow
+          if (-not (Test-Path "C:\VulkanSDK\$ver\Bin\glslc.exe")) { throw 'Vulkan SDK install failed' }
+          echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
+        shell: pwsh
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download Whisper + VAD models
+        run: |
+          mkdir -p src-tauri/models
+          curl -fL -o src-tauri/models/ggml-base.en.bin \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+          curl -fL -o src-tauri/models/ggml-silero-v5.1.2.bin \
+            https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin
+          echo "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf  src-tauri/models/ggml-silero-v5.1.2.bin" | sha256sum -c -
+        shell: bash
+
+      - name: Build Tauri app (compile check, unsigned)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GGML_NATIVE: 'OFF'
+          GGML_AVX512: 'OFF'
+          GGML_AVX512_VBMI: 'OFF'
+          GGML_AVX512_VNNI: 'OFF'
+          GGML_AVX512_BF16: 'OFF'
+        run: npm run tauri build
+        shell: bash
+
+      # Smoke test on a GPU-less machine. Mirrors the installed layout: the
+      # bundled Vulkan loader sits next to murmr.exe.
+      - name: GPU-less fallback smoke test
+        run: |
+          $exe = "src-tauri\target\release\murmr.exe"
+          Copy-Item src-tauri\runtime\windows\vulkan-1.dll src-tauri\target\release\ -Force
+          Copy-Item src-tauri\runtime\windows\vcomp140.dll src-tauri\target\release\ -Force
+          # 1) GPU check child: must exit cleanly with "no GPU" (2), never crash.
+          $p = Start-Process $exe -ArgumentList '--murmr-gpu-probe','src-tauri\models\ggml-base.en.bin' -Wait -PassThru -NoNewWindow -RedirectStandardOutput probe.txt
+          Get-Content probe.txt
+          "probe exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 2 -and $p.ExitCode -ne 0) { throw "GPU probe exited with $($p.ExitCode)" }
+          # 2) Real transcription through the engine (GPU requested → CPU fallback).
+          Add-Type -AssemblyName System.Speech
+          $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $s.SetOutputToWaveFile("$PWD\smoke.wav", $fmt)
+          $s.Speak("Please schedule the quarterly review with Priya and Marcus for next Thursday at two thirty.")
+          $s.Dispose()
+          $b = Start-Process $exe -ArgumentList '--murmr-bench','src-tauri\models\ggml-base.en.bin',"$PWD\smoke.wav",'--runs','2' -Wait -PassThru -NoNewWindow -RedirectStandardOutput bench.txt
+          Get-Content bench.txt
+          if ($b.ExitCode -ne 0) { throw "bench exited with $($b.ExitCode)" }
+          if (-not (Select-String -Path bench.txt -Pattern 'backend=CPU' -Quiet)) { throw 'expected CPU fallback on a GPU-less runner' }
+        shell: pwsh
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: murmr-windows-x64-testbuild
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

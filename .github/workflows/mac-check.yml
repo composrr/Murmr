@@ -50,6 +50,11 @@ jobs:
           mkdir -p src-tauri/models
           curl -L -o src-tauri/models/ggml-base.en.bin \
             https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+          # Engine (session A): Silero VAD model (885 KB), bundled with the base
+          # model. Pinned to a commit and SHA-256-checked.
+          curl -fL -o src-tauri/models/ggml-silero-v5.1.2.bin \
+            https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin
+          echo "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf  src-tauri/models/ggml-silero-v5.1.2.bin" | shasum -a 256 -c -
         shell: bash
 
       # Mirror the release workflow's build env so this is a faithful compile
@@ -71,6 +76,16 @@ jobs:
           GGML_AVX512_VNNI: 'OFF'
           GGML_AVX512_BF16: 'OFF'
         run: npm run tauri build -- --target aarch64-apple-darwin
+        shell: bash
+
+      # Engine (session A): smoke-test the built binary — load base.en (Metal
+      # when the runner exposes a GPU, otherwise CPU), transcribe a `say`
+      # clip, print backend + speed. Informational; never fails the check.
+      - name: Engine smoke test (backend + speed)
+        continue-on-error: true
+        run: |
+          say -o /tmp/murmr-smoke.wav --data-format=LEI16@16000 "Please schedule the quarterly review with Priya and Marcus for next Thursday at two thirty."
+          ./src-tauri/target/aarch64-apple-darwin/release/murmr --murmr-bench src-tauri/models/ggml-base.en.bin /tmp/murmr-smoke.wav --runs 3
         shell: bash
 
       # Upload the .dmg so this branch check doubles as a Mac test build

@@ -73,6 +73,8 @@
     "resources": {
       "models/*.bin": "models/",
       "runtime/windows/vcomp140.dll": "./vcomp140.dll",
+      "runtime/windows/vulkan-1.dll": "./vulkan-1.dll",
+      "runtime/windows/vulkan-1-LICENSE.txt": "./vulkan-1-LICENSE.txt",
       "runtime/README.txt": "./README.txt"
     },
     "icon": [

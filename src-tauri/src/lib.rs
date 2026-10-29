@@ -33,12 +33,13 @@ use crate::db::{
 };
 use crate::settings::{Settings, SettingsStore};
 use crate::sounds::SoundPlayer;
-use crate::transcribe::Transcriber;
+use crate::transcribe::engine::{Engine, EngineStatus};
+use crate::transcribe::models;
 
 // ---------- App state ----------
 
 pub struct AppState {
-    transcriber: Arc<Transcriber>,
+    engine: Arc<Engine>,
     db: Arc<Db>,
     settings: Arc<SettingsStore>,
     practice_mode: Arc<AtomicBool>,
@@ -104,7 +105,7 @@ async fn record_and_transcribe(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TranscriptionResult, String> {
-    let transcriber = Arc::clone(&state.transcriber);
+    let transcriber = state.engine.current();
 
     async_runtime::spawn_blocking(move || -> Result<TranscriptionResult, String> {
         // Emit RMS events while we record so test pages / mic-test can show
@@ -331,7 +332,11 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
     hotkey::update_config(new_hotkeys);
     hotkey::set_pause_during_fullscreen(new_settings.pause_during_fullscreen);
 
-    state.settings.replace(new_settings)
+    state.settings.replace(new_settings)?;
+    // Engine (session A): hot-swap the model if model / GPU / VAD changed.
+    // No-op when they didn't; the load runs in the background.
+    state.engine.request_reload();
+    Ok(())
 }
 
 // ----- Onboarding -----
@@ -801,6 +806,10 @@ fn resolve_model_path(model_name: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .filter(|s| s.ends_with(".bin"))
         .unwrap_or("ggml-base.en.bin");
+    // Downloaded models (Settings -> Advanced) live in <app_data>/models.
+    if let Some(p) = models::downloaded_path(safe) {
+        return p;
+    }
     let model_rel_string = format!("models/{safe}");
     let model_rel: &str = &model_rel_string;
     let mut attempts: Vec<PathBuf> = Vec::new();
@@ -875,49 +884,90 @@ fn models_dir() -> Option<PathBuf> {
         .map(|p| p.to_path_buf())
 }
 
-/// List the Whisper models available to select — every `ggml-*.bin` in the
-/// models directory. Powers the model picker in Advanced settings.
+/// List the Whisper models available to select — every speech model in the
+/// bundled models directory plus the ones downloaded into app data. Powers
+/// the model picker in Advanced settings.
 #[tauri::command]
 fn list_models() -> Vec<String> {
-    let Some(dir) = models_dir() else {
-        return vec!["ggml-base.en.bin".into()];
-    };
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
-        .map(|rd| {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(d) = models_dir() {
+        dirs.push(d);
+    }
+    if let Some(d) = models::download_dir() {
+        dirs.push(d.to_path_buf());
+    }
+    let mut names: Vec<String> = dirs
+        .iter()
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flat_map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.starts_with("ggml-") && n.ends_with(".bin"))
-                .collect()
+                .collect::<Vec<_>>()
         })
-        .unwrap_or_default();
+        .filter(|n| models::is_speech_model_file(n))
+        .collect();
     if names.is_empty() {
-        names.push("ggml-base.en.bin".into());
+        names.push(models::BASE_MODEL.into());
     }
     names.sort();
+    names.dedup();
     names
 }
 
-/// Load the Transcriber for the user's selected model, falling back to the
-/// bundled base model if the selection can't be loaded (missing file, etc).
-fn load_transcriber(model_name: &str) -> Result<Transcriber, String> {
-    let path = resolve_model_path(model_name);
-    match Transcriber::new(&path.to_string_lossy()) {
-        Ok(t) => Ok(t),
-        Err(e) if model_name != "ggml-base.en.bin" => {
-            perf_log::append(&format!(
-                "[model] selected model '{model_name}' failed to load ({e}); falling back to base.en"
-            ));
-            let base = resolve_model_path("ggml-base.en.bin");
-            Transcriber::new(&base.to_string_lossy())
-        }
-        Err(e) => Err(e),
-    }
+// ---------- Engine commands (session A: GPU, model download, hot-swap) ----------
+
+#[tauri::command]
+fn engine_status(state: State<'_, AppState>) -> EngineStatus {
+    state.engine.status()
 }
+
+#[tauri::command]
+fn model_catalog() -> Vec<models::CatalogEntry> {
+    models::catalog_entries()
+}
+
+/// Download a catalog model with progress events (`murmr:model-download`).
+/// Resolves once the file is downloaded and verified.
+#[tauri::command]
+async fn download_model(file: String, app: AppHandle) -> Result<(), String> {
+    let app_for_progress = app.clone();
+    models::download(&file, move |p| {
+        let _ = app_for_progress.emit("murmr:model-download", p);
+    })
+    .await
+    .map(|_| ())
+}
+
+#[tauri::command]
+fn cancel_model_download() {
+    models::cancel_download();
+}
+
+/// Delete a downloaded model. Refuses the model that is selected or loaded.
+#[tauri::command]
+fn delete_model(file: String, state: State<'_, AppState>) -> Result<(), String> {
+    if state.settings.get().model_name == file || state.engine.status().model_name == file {
+        return Err("Switch to another model before deleting this one.".into());
+    }
+    models::delete_downloaded(&file)
+}
+
+/// Clear the cached GPU check so the next launch probes again.
+#[tauri::command]
+fn retry_gpu_detection(state: State<'_, AppState>) {
+    state.engine.retry_gpu_detection();
+}
+
+// ---------- end engine commands ----------
 
 // ---------- Entry point ----------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Engine (session A): when launched as the GPU check child process, run
+    // the check and exit before anything else (no window, no hotkeys).
+    transcribe::gpu::maybe_run_probe_and_exit();
+
     // Force OpenMP to actually parallelize. MSVC's OpenMP 2.0 runtime
     // (vcomp140.dll) frequently defaults to 1 thread even when the
     // `#pragma omp parallel num_threads(N)` clause asks for more — at
@@ -936,6 +986,8 @@ pub fn run() {
     if std::env::var_os("OMP_DYNAMIC").is_none() {
         std::env::set_var("OMP_DYNAMIC", "FALSE");
     }
+    // Engine (session A): developer benchmark mode (prints numbers, exits).
+    transcribe::bench::maybe_run_bench_and_exit();
 
     // Bump our process priority so Whisper's CPU threads don't get throttled
     // when Murmr isn't the foreground window.
@@ -1009,37 +1061,48 @@ pub fn run() {
     // Install ggml/whisper log capture so the model's CPU-feature detection
     // and threading info land in perf.log alongside our own measurements.
     transcribe::install_log_hook();
-    perf_log::append(&format!(
-        "[startup] system_info: {}",
-        transcribe::whisper_system_info()
-    ));
 
     // Open DB + settings (~ms each on a warm disk).
     let db = Db::open(&app_data_dir).expect("failed to open Murmr database");
     let settings = SettingsStore::open(&app_data_dir).expect("failed to open Murmr settings store");
 
-    // Load the Whisper model (~2-5 s). Uses the user's selected model, with an
-    // automatic fallback to the bundled base model if the selection can't load.
+    // Load the Whisper model (~2-5 s). Uses the user's selected model on the
+    // GPU when one is usable, with automatic fallback to the bundled base
+    // model on CPU. The engine decides GPU use BEFORE ggml initializes (see
+    // transcribe/gpu.rs), so system_info is logged after it.
     let selected_model = settings.get().model_name;
     perf_log::append(&format!("[startup] loading Whisper model '{selected_model}'"));
     println!("[murmr] loading Whisper model '{selected_model}'");
-    let transcriber = std::sync::Arc::new(
-        load_transcriber(&selected_model).unwrap_or_else(|e| {
+    let engine = Engine::start(&app_data_dir, Arc::clone(&settings), resolve_model_path)
+        .unwrap_or_else(|e| {
             panic!(
                 "failed to load Whisper model '{selected_model}': {e}\n\
                  If running from source, did you run\n\
                  `curl -L -o src-tauri/models/ggml-base.en.bin \
                  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`?"
             )
-        }),
-    );
+        });
+    perf_log::append(&format!(
+        "[startup] system_info: {}",
+        transcribe::whisper_system_info()
+    ));
+    {
+        let st = engine.status();
+        perf_log::append(&format!(
+            "[startup] compute backend: {} (model {}, vad {}){}",
+            st.backend.label(),
+            st.model_name,
+            st.vad_active,
+            st.gpu_note.map(|n| format!(" — {n}")).unwrap_or_default()
+        ));
+    }
 
     // Pre-construct the practice-mode flag so AppState (managed at builder
     // time) and the Controller (built in setup) reference the same atomic.
     let practice_mode = Arc::new(AtomicBool::new(false));
 
     let app_state = AppState {
-        transcriber: Arc::clone(&transcriber),
+        engine: Arc::clone(&engine),
         db: Arc::clone(&db),
         settings: Arc::clone(&settings),
         practice_mode: Arc::clone(&practice_mode),
@@ -1124,8 +1187,9 @@ pub fn run() {
             hotkey::spawn(hotkey_tx, initial_hotkeys);
             let sounds = SoundPlayer::new(Arc::clone(&settings), app.handle());
 
+            engine.attach_app(app.handle().clone());
             let controller = Controller::new(
-                Arc::clone(&transcriber),
+                Arc::clone(&engine),
                 Arc::clone(&db),
                 Arc::clone(&settings),
                 Arc::clone(&sounds),
@@ -1215,6 +1279,14 @@ pub fn run() {
             list_models,
             insert_edited,
             hide_hud_window,
+            // ---- engine (session A) ----
+            engine_status,
+            model_catalog,
+            download_model,
+            cancel_model_download,
+            delete_model,
+            retry_gpu_detection,
+            // ---- end engine ----
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

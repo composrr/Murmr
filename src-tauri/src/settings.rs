@@ -172,6 +172,14 @@ pub struct Settings {
     /// `dictation_hotkey`.
     #[serde(default)]
     pub edit_last_hotkey: String,
+
+    // ---- Engine (session A) ----
+    /// Drop silent stretches with Silero VAD before Whisper decodes. Cuts
+    /// hallucinations and repeat loops on recordings with long pauses. On by
+    /// default; falls back to the full audio whenever VAD is unsure.
+    #[serde(default = "default_true")]
+    pub vad_enabled: bool,
+    // ---- end engine block ----
 }
 
 fn default_true() -> bool {
@@ -253,6 +261,10 @@ impl Default for Settings {
             streamer_mode_mute_chimes: false,
 
             edit_last_hotkey: String::new(),
+
+            // ---- Engine (session A) ----
+            vad_enabled: true,
+            // ---- end engine block ----
         }
     }
 }

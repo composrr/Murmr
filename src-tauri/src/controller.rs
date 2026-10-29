@@ -64,6 +64,7 @@ use crate::injector;
 use crate::perf_log;
 use crate::settings::SettingsStore;
 use crate::sounds::SoundPlayer;
+use crate::transcribe::engine::Engine;
 use crate::transcribe::{self, Transcriber};
 
 /// Floor for the user-configurable tap-vs-hold threshold. Anything under
@@ -161,7 +162,9 @@ pub enum Status {
 
 pub struct Controller {
     recorder: Arc<Recorder>,
-    transcriber: Arc<Transcriber>,
+    /// Live speech engine; `engine.current()` snapshots the loaded model for
+    /// one dictation so a model hot-swap never disturbs it.
+    engine: Arc<Engine>,
     db: Arc<Db>,
     settings: Arc<SettingsStore>,
     sounds: Arc<SoundPlayer>,
@@ -181,7 +184,7 @@ pub struct Controller {
 
 impl Controller {
     pub fn new(
-        transcriber: Arc<Transcriber>,
+        engine: Arc<Engine>,
         db: Arc<Db>,
         settings: Arc<SettingsStore>,
         sounds: Arc<SoundPlayer>,
@@ -199,7 +202,7 @@ impl Controller {
             });
         Self {
             recorder: Arc::new(Recorder::new()),
-            transcriber,
+            engine,
             db,
             settings,
             sounds,
@@ -539,7 +542,7 @@ impl Controller {
             return;
         }
 
-        let transcriber = Arc::clone(&self.transcriber);
+        let transcriber = self.engine.current();
         let db = Arc::clone(&self.db);
         let settings_store = Arc::clone(&self.settings);
         let sounds = Arc::clone(&self.sounds);
@@ -1062,7 +1065,11 @@ fn text_is_suspicious(candidate: &str, last_injected: &Mutex<Option<LastInjectio
 /// Transcribe, splitting very long recordings into sequential chunks so a
 /// late failure doesn't discard everything and each piece completes on its
 /// own. Short recordings take the original single-shot path.
-fn transcribe_maybe_chunked(
+///
+/// Context carry-over: each chunk after the first is prompted with the
+/// dictionary words plus the tail of the previous chunk's text, so casing,
+/// punctuation style and a sentence cut at the boundary stay consistent.
+pub(crate) fn transcribe_maybe_chunked(
     transcriber: &Transcriber,
     samples_16k: &[f32],
     initial_prompt: Option<&str>,
@@ -1083,7 +1090,9 @@ fn transcribe_maybe_chunked(
     let mut start = 0usize;
     for (i, end) in boundaries.iter().enumerate() {
         let seg = &samples_16k[start..*end];
-        match transcriber.transcribe(seg, initial_prompt, accuracy) {
+        let prev = pieces.last().map(String::as_str).unwrap_or("");
+        let prompt = transcriber.compose_prompt(initial_prompt, prev);
+        match transcriber.transcribe(seg, prompt.as_deref(), accuracy) {
             Ok(t) => {
                 ok_count += 1;
                 let t = t.trim();
