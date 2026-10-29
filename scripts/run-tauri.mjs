@@ -150,6 +150,12 @@ function setWhisperBuildEnv() {
     extraEnv.GGML_AVX2 = 'ON';
     extraEnv.GGML_FMA = 'ON';
     extraEnv.GGML_F16C = 'ON';
+    // Engine (session A): ggml-vulkan builds its shader generator as a nested
+    // CMake ExternalProject whose paths exceed MAX_PATH, and MSBuild's
+    // FileTracker then fails (FTK1011). MSBuild reads env vars as properties,
+    // so this turns file tracking off for every nested build. Only affects
+    // incremental-build bookkeeping, not the compiled output.
+    if (!env.TrackFileAccess) extraEnv.TrackFileAccess = 'false';
   }
   // macOS + Linux: cmake's defaults include -O3 already. clang/gcc handle
   // SIMD via -march=native (which GGML_NATIVE=ON already turns on).

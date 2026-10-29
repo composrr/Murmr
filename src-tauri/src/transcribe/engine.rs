@@ -187,22 +187,35 @@ impl Engine {
         Transcriber::new(&path.to_string_lossy(), wanted.gpu, vad.as_deref())
     }
 
-    /// Startup load: selected model, then the bundled base model on CPU.
+    /// Startup load: the selected model, then the bundled base model (on the
+    /// GPU if wanted), then base on CPU — the pre-GPU behaviour.
     fn load_with_fallback(
         wanted: &Wanted,
         resolve: fn(&str) -> PathBuf,
     ) -> Result<(Transcriber, Wanted), String> {
-        match Self::load(wanted, resolve) {
-            Ok(t) => Ok((t, wanted.clone())),
-            Err(e) => {
-                perf_log::append(&format!(
-                    "[engine] '{}' (gpu={}) failed to load ({e}); falling back to base.en on CPU",
-                    wanted.model, wanted.gpu
-                ));
-                let fb = Wanted { model: BASE_MODEL.into(), gpu: false, vad: wanted.vad };
-                Self::load(&fb, resolve).map(|t| (t, fb))
+        let mut chain = vec![wanted.clone()];
+        for fb in [
+            Wanted { model: BASE_MODEL.into(), gpu: wanted.gpu, vad: wanted.vad },
+            Wanted { model: BASE_MODEL.into(), gpu: false, vad: wanted.vad },
+        ] {
+            if !chain.contains(&fb) {
+                chain.push(fb);
             }
         }
+        let mut last_err = String::new();
+        for w in chain {
+            match Self::load(&w, resolve) {
+                Ok(t) => return Ok((t, w)),
+                Err(e) => {
+                    perf_log::append(&format!(
+                        "[engine] '{}' (gpu={}) failed to load: {e} — trying next fallback",
+                        w.model, w.gpu
+                    ));
+                    last_err = e;
+                }
+            }
+        }
+        Err(last_err)
     }
 
     fn reload_blocking(self: &Arc<Self>) {

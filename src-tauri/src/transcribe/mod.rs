@@ -218,18 +218,19 @@ impl Transcriber {
     /// (Vulkan on Windows, Metal on Apple Silicon); with no usable device it
     /// stays on CPU, and `backend()` reports what was actually used.
     pub fn new(model_path: &str, use_gpu: bool, vad_model: Option<&Path>) -> Result<Self, String> {
+        // A model load initializes ggml's backend registry, which loads the
+        // GPU driver even for a CPU model (unless drivers were hidden). Guard
+        // it so a driver crash here can't become a crash loop on every launch.
+        let _guard = gpu::driver_code_may_run().then(gpu::InflightGuard::begin);
         let gpu_dev = if use_gpu { gpu::first_gpu_device() } else { None };
         let mut cparams = WhisperContextParameters::default();
         cparams.use_gpu(gpu_dev.is_some());
         // Flash attention is a clear win on GPU backends; keep the CPU path
         // exactly as it was.
         cparams.flash_attn(gpu_dev.is_some());
-        let ctx = {
-            // Model load is where a GPU backend first touches the driver.
-            let _guard = gpu_dev.is_some().then(gpu::InflightGuard::begin);
-            WhisperContext::new_with_params(model_path, cparams)
-                .map_err(|e| format!("failed to load Whisper model at {model_path}: {e}"))?
-        };
+        let ctx = WhisperContext::new_with_params(model_path, cparams)
+            .map_err(|e| format!("failed to load Whisper model at {model_path}: {e}"))?;
+        drop(_guard);
         let backend = match gpu_dev {
             Some(dev) => BackendInfo { kind: gpu::backend_kind().into(), device: Some(dev) },
             None => BackendInfo::cpu(),

@@ -94,6 +94,7 @@ The sidebar has:
 | **Node.js** | Frontend | `v20+` |
 | **CMake** | whisper.cpp build | `3.20+` |
 | **LLVM (clang)** | bindgen needs `libclang.dll` | `15+` |
+| **Vulkan SDK** (Windows) | GPU (Vulkan) build of whisper.cpp | `1.4.341+` |
 | **Visual Studio Build Tools** (Windows) | MSVC + Windows SDK | `2022` (or 2019) |
 | **Xcode Command Line Tools** (macOS) | Apple toolchain | latest |
 
@@ -108,12 +109,19 @@ winget install --id Kitware.CMake --silent
 
 # LLVM — required for bindgen (whisper-rs builds via bindgen)
 winget install --id LLVM.LLVM --silent
+
+# Vulkan SDK — required for the GPU build (headers, vulkan-1.lib, glslc).
+# Download from https://vulkan.lunarg.com/sdk/home#windows and install, or
+# copy-only into your user folder (no admin needed):
+#   vulkansdk-windows-X64-<ver>.exe --root $HOME\VulkanSDK\<ver> `
+#     --accept-licenses --default-answer --confirm-command install copy_only=1
 ```
 
 The repo includes [`scripts/run-tauri.mjs`](scripts/run-tauri.mjs) which
-auto-discovers the VS-bundled CMake + MSVC and the standard LLVM install path
-and prepends them to `PATH` / sets `LIBCLANG_PATH` so `npm run tauri dev`
-works without Developer Command Prompts.
+auto-discovers the VS-bundled CMake + MSVC, the standard LLVM install path and
+the Vulkan SDK (`C:\VulkanSDK\*` or `~\VulkanSDK\*`) and prepends them to
+`PATH` / sets `LIBCLANG_PATH` / `VULKAN_SDK` so `npm run tauri dev` works
+without Developer Command Prompts.
 
 #### One-time install on macOS
 
@@ -132,7 +140,16 @@ curl -L -o src-tauri/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-The file is ~150 MB and is gitignored.
+The file is ~150 MB and is gitignored. Also grab the Silero VAD model (885 KB,
+used to skip silence; Murmr works without it, just with VAD off):
+
+```bash
+curl -L -o src-tauri/models/ggml-silero-v5.1.2.bin \
+  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
+```
+
+Larger models (Large v3 Turbo) are downloaded in-app from Settings → Advanced
+into `<app data>/models/`.
 
 ### Run the dev build
 

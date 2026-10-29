@@ -1326,6 +1326,8 @@ pub fn run() {
                 tauri::RunEvent::Exit => {
                     perf_log::append("[shutdown] RunEvent::Exit → unducking audio sessions");
                     audio_duck::unduck();
+                    // Engine (session A): a clean quit mid-GPU-work isn't a crash.
+                    transcribe::gpu::clear_inflight_marker();
                 }
 
                 _ => {}

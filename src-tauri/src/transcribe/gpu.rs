@@ -398,6 +398,18 @@ fn disable_gpu_drivers_in_process() {
 
 static DRIVERS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// True when loading a model can run GPU-driver code in this process.
+pub fn driver_code_may_run() -> bool {
+    compiled_with_gpu() && !drivers_disabled()
+}
+
+/// Clean shutdown: GPU work interrupted by a normal quit is not a crash.
+pub fn clear_inflight_marker() {
+    if let Some(p) = data_path(MARKER_FILE) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 /// GPU drivers were kept out of this process at startup; using the GPU now
 /// needs a restart.
 pub fn drivers_disabled() -> bool {

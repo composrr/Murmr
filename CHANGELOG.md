@@ -14,6 +14,29 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+<!-- engine (session A): GPU + large-v3-turbo + context carry-over + Silero VAD -->
+### New
+
+- **GPU transcription.** Murmr now uses your graphics card — Vulkan on Windows
+  (NVIDIA, AMD, Intel) and Metal on Apple Silicon Macs. Settings → Advanced
+  shows which one is in use. No GPU, or a GPU that misbehaves? Murmr checks
+  once per version and quietly stays on the CPU. A **Use GPU** switch lets you
+  force CPU-only.
+- **Large v3 Turbo model, one click away.** Download it from Settings →
+  Advanced (574 MB, checksum-verified) for much better accuracy on names,
+  jargon and accents. It switches over instantly — no restart. Recommended
+  when you have a GPU; it is slow on CPU.
+- **Skip silence.** Pauses are trimmed out before transcription (Silero VAD),
+  which cuts the phantom "Thank you." and repeat loops on long takes. On by
+  default; switch it off in Advanced.
+
+### Improved
+
+- **Long dictations stay consistent.** Each ~30 s piece of a long recording
+  now hears the end of the previous piece (plus your dictionary words), so
+  casing, punctuation and a sentence split across the cut come out right.
+<!-- end engine -->
+
 ---
 
 ## v0.1.72 — Quick taps register instantly
