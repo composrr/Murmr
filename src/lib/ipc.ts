@@ -290,6 +290,11 @@ export interface Settings {
   /** Drop silent stretches with Silero VAD before decoding. Default true. */
   vad_enabled: boolean;
   // ---- end engine block ----
+
+  // ---- Live preview ----
+  /** Rough text in the HUD while recording. null = automatic (on with a GPU, off on CPU). */
+  live_preview: boolean | null;
+  // ---- end live preview ----
 }
 
 export function getSettings(): Promise<Settings> {

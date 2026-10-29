@@ -47,6 +47,12 @@ pub enum PartialResult {
 }
 
 impl Transcriber {
+    /// Small enough to preview on a CPU without hurting the final pass
+    /// (tiny / base / small: <= 12 encoder layers; turbo and large have 32).
+    pub fn is_lightweight(&self) -> bool {
+        self.ctx.model_n_audio_layer() <= 12
+    }
+
     pub fn partial_decoder(&self) -> Result<PartialDecoder, String> {
         self.ctx
             .create_state()

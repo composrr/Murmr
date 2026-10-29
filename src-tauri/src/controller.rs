@@ -1574,6 +1574,12 @@ impl Controller {
         if !s.live_preview.unwrap_or(on_gpu) {
             return false;
         }
+        // On CPU only light models are previewed: a turbo partial takes 4-8 s
+        // on a 12-core CPU and measurably delayed the final pass.
+        if !on_gpu && !t.is_lightweight() {
+            perf_log::append("[preview] skipped: large model on CPU (would slow the final pass)");
+            return false;
+        }
         let cfg = if on_gpu {
             crate::live_preview::PreviewConfig::gpu()
         } else {
@@ -1593,6 +1599,11 @@ impl Controller {
             prompt,
             cfg,
             move |update| {
+                #[cfg(debug_assertions)]
+                perf_log::append(&format!(
+                    "[preview] update stable={:?} tentative={:?}",
+                    update.stable, update.tentative
+                ));
                 let _ = app.emit("murmr:live-preview", update);
             },
             move |st| {
@@ -1626,6 +1637,8 @@ impl Controller {
         if let Some(hud) = self.app.get_webview_window("hud") {
             if let Err(e) = hud.set_size(tauri::LogicalSize::new(w, h)) {
                 perf_log::append(&format!("[hud] resize for preview={preview} failed: {e}"));
+            } else {
+                perf_log::append(&format!("[hud] layout preview={preview} size={w}x{h}"));
             }
         }
     }

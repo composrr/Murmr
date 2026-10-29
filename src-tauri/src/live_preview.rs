@@ -207,13 +207,24 @@ fn run(
         }
 
         let max_len = (cfg.max_window.as_secs_f64() * 16_000.0) as usize;
-        let prompt = t.compose_prompt(dict_prompt, &committed_text);
+        // Dictionary words only. Feeding the committed text back as a prompt
+        // makes whisper repeat it over silence (measured: one sentence came
+        // back 20 times on a take with long pauses).
+        let prompt = dict_prompt.map(str::to_string);
 
         if window.len() > max_len {
             // Commit the first part at a pause and slide the window.
             let cut = quiet_cut(&window, max_len * 2 / 3);
+            let raw_frames = cut * sr / 16_000;
+            if !has_speech(&window[..cut], cfg.speech_rms) {
+                // Nothing said in the part we're dropping: slide past it.
+                committed_raw += raw_frames * ch;
+                agree = Agreement::default();
+                continue;
+            }
+            let head = squeeze_silence(&window[..cut], cfg.speech_rms);
             let (res, ms) = partial::timed(|| {
-                decoder.decode(t, &window[..cut], prompt.as_deref(), generation, cfg.shrink_ctx, cfg.cpu_threads)
+                decoder.decode(t, &head, prompt.as_deref(), generation, cfg.shrink_ctx, cfg.cpu_threads)
             });
             stats.decodes += 1;
             stats.total_decode_ms += ms;
@@ -221,8 +232,9 @@ fn run(
             match res {
                 Ok(PartialResult::Text(text)) => {
                     append_text(&mut committed_text, &text);
+                    // Also catches a sentence repeated across the cut.
+                    committed_text = collapse_repeats(&committed_text);
                     stats.commits += 1;
-                    let raw_frames = cut * sr / 16_000;
                     committed_raw += raw_frames * ch;
                     agree = Agreement::default();
                 }
@@ -235,14 +247,15 @@ fn run(
             continue;
         }
 
+        let squeezed = squeeze_silence(&window, cfg.speech_rms);
         let (res, ms) = partial::timed(|| {
-            decoder.decode(t, &window, prompt.as_deref(), generation, cfg.shrink_ctx, cfg.cpu_threads)
+            decoder.decode(t, &squeezed, prompt.as_deref(), generation, cfg.shrink_ctx, cfg.cpu_threads)
         });
         stats.decodes += 1;
         stats.total_decode_ms += ms;
         stats.max_decode_ms = stats.max_decode_ms.max(ms);
         let hyp = match res {
-            Ok(PartialResult::Text(text)) => text,
+            Ok(PartialResult::Text(text)) => collapse_repeats(&text),
             Ok(PartialResult::Aborted) => return finish(stats, stop),
             Err(e) => {
                 perf_log::append(&format!("[preview] {e} — stopping preview for this take"));
@@ -282,6 +295,65 @@ fn has_speech(samples: &[f32], level: f32) -> bool {
         let rms = (b.iter().map(|&s| s * s).sum::<f32>() / b.len().max(1) as f32).sqrt();
         rms > level
     })
+}
+
+/// Shorten every silent stretch to at most 300 ms. Whisper invents words
+/// (or repeats itself) over long silences; the preview doesn't need them.
+fn squeeze_silence(samples: &[f32], level: f32) -> Vec<f32> {
+    const BLOCK: usize = 1600; // 100 ms
+    const KEEP_QUIET_BLOCKS: usize = 3;
+    let mut out = Vec::with_capacity(samples.len());
+    let mut quiet_run = 0usize;
+    for b in samples.chunks(BLOCK) {
+        let rms = (b.iter().map(|&s| s * s).sum::<f32>() / b.len().max(1) as f32).sqrt();
+        if rms > level * 0.5 {
+            quiet_run = 0;
+            out.extend_from_slice(b);
+        } else {
+            quiet_run += 1;
+            if quiet_run <= KEEP_QUIET_BLOCKS {
+                out.extend_from_slice(b);
+            }
+        }
+    }
+    out
+}
+
+/// Remove whisper's repetition loops from a rough hypothesis: consecutive
+/// duplicate sentences, phrases repeated back to back, and stuttered tokens
+/// like "re-re-re-re-".
+fn collapse_repeats(text: &str) -> String {
+    // 1) Stuttered tokens: cut a word at its first repeated hyphen piece.
+    let words: Vec<String> = text
+        .split_whitespace()
+        .map(|w| {
+            let parts: Vec<&str> = w.split('-').collect();
+            if parts.len() > 3 && parts.windows(2).filter(|p| p[0] == p[1]).count() >= 2 {
+                format!("{}-", parts[0])
+            } else {
+                w.to_string()
+            }
+        })
+        .collect();
+    // 2) Phrases (1..=40 words, i.e. up to a long sentence) repeated back to
+    //    back: keep one copy.
+    let mut out: Vec<String> = Vec::with_capacity(words.len());
+    for w in words {
+        out.push(w);
+        for n in 1..=40usize {
+            let len = out.len();
+            if len >= 2 * n
+                && out[len - n..]
+                    .iter()
+                    .zip(&out[len - 2 * n..len - n])
+                    .all(|(a, b)| norm(a) == norm(b))
+            {
+                out.truncate(len - n);
+                break;
+            }
+        }
+    }
+    out.join(" ")
 }
 
 /// Quietest 100 ms block within ±3 s of `target` (index into 16 kHz audio).
@@ -364,6 +436,29 @@ mod tests {
     }
 
     #[test]
+    fn repeats_are_collapsed() {
+        assert_eq!(
+            collapse_repeats("Good morning. Good morning. Good morning. Thanks"),
+            "Good morning. Thanks"
+        );
+        assert_eq!(
+            collapse_repeats("the quarterly re-re-re-re-re-re- review"),
+            "the quarterly re- review"
+        );
+        assert_eq!(collapse_repeats("no, no, I mean yes"), "no, I mean yes");
+        assert_eq!(collapse_repeats("plain sentence here"), "plain sentence here");
+    }
+
+    #[test]
+    fn silence_is_squeezed() {
+        let mut v = vec![0.2f32; 16_000];
+        v.extend(vec![0.0f32; 16_000 * 4]);
+        v.extend(vec![0.2f32; 16_000]);
+        let out = squeeze_silence(&v, 0.015);
+        assert_eq!(out.len(), 16_000 * 2 + 1600 * 3);
+    }
+
+    #[test]
     fn cut_lands_in_silence() {
         let mut v = vec![0.3f32; 16_000 * 20];
         for x in &mut v[16_000 * 12..16_000 * 12 + 4_000] {
@@ -371,5 +466,49 @@ mod tests {
         }
         let c = quiet_cut(&v, 16_000 * 13);
         assert!(c >= 16_000 * 12 && c <= 16_000 * 12 + 4_000, "cut at {c}");
+    }
+}
+
+/// Debug-only end-to-end self-test: with `MURMR_SELFTEST=1` and
+/// `MURMR_FAKE_MIC_WAV=<file>`, presses the dictation key through the real
+/// controller channel (practice mode: nothing is pasted or saved), holds it
+/// for the WAV's length, releases, and exits. Everything is logged to
+/// perf.log. Used to test the preview without touching the user's keyboard,
+/// focus, or installed Murmr.
+#[cfg(debug_assertions)]
+pub mod selftest {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use crossbeam_channel::Sender;
+    use tauri::{AppHandle, Manager};
+
+    use crate::hotkey::HotkeyEvent;
+    use crate::perf_log;
+
+    pub fn spawn(app: AppHandle, tx: Sender<HotkeyEvent>, practice: Arc<AtomicBool>) {
+        std::thread::spawn(move || {
+            practice.store(true, Ordering::SeqCst);
+            for label in ["main", "onboarding"] {
+                if let Some(w) = app.get_webview_window(label) {
+                    let _ = w.hide();
+                }
+            }
+            let secs: f64 = std::env::var("MURMR_FAKE_MIC_WAV")
+                .ok()
+                .and_then(|p| hound::WavReader::open(p).ok())
+                .map(|r| r.duration() as f64 / r.spec().sample_rate as f64)
+                .unwrap_or(5.0);
+            std::thread::sleep(Duration::from_secs(4)); // let the HUD webview load
+            perf_log::append(&format!("[selftest] DictationDown (clip {secs:.1}s)"));
+            let _ = tx.send(HotkeyEvent::DictationDown { pressed_at: Instant::now() });
+            std::thread::sleep(Duration::from_secs_f64(secs + 0.7));
+            perf_log::append("[selftest] DictationUp");
+            let _ = tx.send(HotkeyEvent::DictationUp);
+            std::thread::sleep(Duration::from_secs(20));
+            perf_log::append("[selftest] done, exiting");
+            app.exit(0);
+        });
     }
 }

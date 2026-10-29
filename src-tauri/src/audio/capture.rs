@@ -119,6 +119,14 @@ impl Recorder {
             return Err("already recording".into());
         }
 
+        // Live preview self-test (debug builds only): play a WAV in real time
+        // instead of opening the mic. Never compiled into release builds.
+        #[cfg(debug_assertions)]
+        if let Ok(wav) = std::env::var("MURMR_FAKE_MIC_WAV") {
+            *slot = Some(fake_mic::start(&wav, on_rms)?);
+            return Ok(());
+        }
+
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
         let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
         let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<LiveBuffer, String>>(1);
@@ -307,5 +315,65 @@ impl Recorder {
             .send(StreamCmd::Cancel)
             .map_err(|e| format!("failed to signal cancel: {e}"))?;
         Ok(())
+    }
+}
+
+/// Debug-only fake microphone for the live-preview self-test: streams a WAV
+/// into the capture buffer at real-time speed, exactly like cpal would.
+#[cfg(debug_assertions)]
+mod fake_mic {
+    use super::*;
+
+    pub(super) fn start(path: &str, on_rms: Option<RmsCallback>) -> Result<Active, String> {
+        let mut r = hound::WavReader::open(path).map_err(|e| format!("fake mic: {e}"))?;
+        let spec = r.spec();
+        let data: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => r.samples::<f32>().filter_map(Result::ok).collect(),
+            hound::SampleFormat::Int => {
+                let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
+                r.samples::<i32>().filter_map(Result::ok).map(|s| s as f32 / max).collect()
+            }
+        };
+        let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let live = LiveBuffer {
+            buffer: Arc::clone(&buffer),
+            sample_rate: spec.sample_rate,
+            channels: spec.channels,
+        };
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
+        let block = (spec.sample_rate as usize * spec.channels as usize) / 50; // 20 ms
+        thread::spawn(move || {
+            let mut pos = 0;
+            loop {
+                match cmd_rx.recv_timeout(Duration::from_millis(20)) {
+                    Ok(StreamCmd::Stop) => {
+                        let samples = std::mem::take(&mut *buffer.lock());
+                        let _ = result_tx.send(Capture {
+                            samples,
+                            sample_rate: spec.sample_rate,
+                            channels: spec.channels,
+                            device_name: "fake mic".into(),
+                        });
+                        return;
+                    }
+                    Ok(StreamCmd::Cancel) => return,
+                    Err(_) => {}
+                }
+                // After the file ends, keep "recording" silence.
+                let end = (pos + block).min(data.len());
+                let chunk: Vec<f32> = if pos < end {
+                    data[pos..end].to_vec()
+                } else {
+                    vec![0.0; block]
+                };
+                pos = end;
+                if let Some(cb) = &on_rms {
+                    cb(block_rms(&chunk));
+                }
+                buffer.lock().extend_from_slice(&chunk);
+            }
+        });
+        Ok(Active { cmd_tx, result_rx, live })
     }
 }
