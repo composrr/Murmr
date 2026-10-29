@@ -80,6 +80,14 @@ thiserror = "2"
 crossbeam-channel = "0.5"
 regex = "1"
 
+# ---- AI cleanup (llm module) ----
+# Blocking HTTPS for the Anthropic API. Same reqwest/rustls(ring) stack
+# tauri-plugin-updater already pulls in, so no new TLS backend.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# API key storage in Windows Credential Manager / macOS Keychain.
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+
 # Win32 APIs for HUD positioning (focus module).
 # - windows-sys: lightweight legacy bindings (GetGUIThreadInfo, GetForegroundWindow)
 # - windows:     full COM bindings for UI Automation (modern apps' focused element)

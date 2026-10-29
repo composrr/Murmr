@@ -285,6 +285,10 @@ export interface Settings {
   // ---- Edit-last ----
   /** rdev key name for the "edit & re-inject last transcript" hotkey. Empty = disabled. */
   edit_last_hotkey: string;
+
+  // ---- AI cleanup (llm module) ----
+  /** Rewrite each dictation with Claude Haiku (user's own API key). Default false. */
+  ai_cleanup: boolean;
 }
 
 export function getSettings(): Promise<Settings> {
@@ -432,4 +436,37 @@ export function listenStatus(handler: (status: DictationStatus) => void): Promis
 
 export function listenTranscriptionSaved(handler: () => void): Promise<UnlistenFn> {
   return listen<null>('murmr:transcription-saved', () => handler());
+}
+
+// ----- AI cleanup (llm module) -----
+
+export interface LlmKeyStatus {
+  has_key: boolean;
+  /** Masked key for display, e.g. "sk-ant-…WXYZ". Never the full key. */
+  hint: string | null;
+}
+
+export interface LlmKeyTestResult {
+  ok: boolean;
+  latency_ms: number;
+  /** Cleaned sample text on success, a readable error otherwise. */
+  message: string;
+}
+
+export function llmKeyStatus(): Promise<LlmKeyStatus> {
+  return invoke<LlmKeyStatus>('llm_key_status');
+}
+
+/** Stores the key in the OS keychain (never in settings.json). */
+export function llmSaveKey(key: string): Promise<LlmKeyStatus> {
+  return invoke<LlmKeyStatus>('llm_save_key', { key });
+}
+
+export function llmRemoveKey(): Promise<void> {
+  return invoke<void>('llm_remove_key');
+}
+
+/** Runs a real cleanup on a sample. Pass `key` to test before saving. */
+export function llmTestKey(key?: string): Promise<LlmKeyTestResult> {
+  return invoke<LlmKeyTestResult>('llm_test_key', { key: key ?? null });
 }

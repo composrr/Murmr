@@ -172,6 +172,14 @@ pub struct Settings {
     /// `dictation_hotkey`.
     #[serde(default)]
     pub edit_last_hotkey: String,
+
+    // ---- AI cleanup (llm module) ----
+    /// Send each dictation (after the rule-based pass) to Claude Haiku for a
+    /// Wispr-Flow-style rewrite: punctuation, grammar, filler, lists. Uses
+    /// the user's own Anthropic API key from the OS keychain (never stored
+    /// here). Off by default; any failure falls back to the rule-based text.
+    #[serde(default)]
+    pub ai_cleanup: bool,
 }
 
 fn default_true() -> bool {
@@ -253,6 +261,8 @@ impl Default for Settings {
             streamer_mode_mute_chimes: false,
 
             edit_last_hotkey: String::new(),
+
+            ai_cleanup: false,
         }
     }
 }

@@ -14,6 +14,20 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+<!-- AI cleanup (ai-cleanup branch) -->
+### New
+
+- **AI cleanup (optional, off by default).** Turn it on in Preferences and add
+  your own Anthropic API key, and Murmr polishes each dictation with Claude
+  Haiku after its built-in rules: punctuation, grammar, filler words, false
+  starts, and lists or paragraphs when you clearly dictated one. It never
+  answers or acts on what you said, and it keeps your words. If the call is
+  slow (over ~2.5 s), fails, or no key is saved, Murmr types the rule-based
+  text as before. The key lives in your system keychain. When it's on, the
+  text of each dictation is sent to Anthropic; audio never leaves your
+  computer. Skipped in literal mode and for very short dictations.
+<!-- /AI cleanup -->
+
 ---
 
 ## v0.1.72 — Quick taps register instantly

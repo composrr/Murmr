@@ -478,8 +478,10 @@ impl Controller {
         // would mean a failed start (mic perms, device gone) leaves the
         // system at a permanently lower volume until the next recording.
         if result.is_ok() {
-            let amount = self.settings.get().audio_duck_amount;
-            audio_duck::duck(amount);
+            let settings = self.settings.get();
+            audio_duck::duck(settings.audio_duck_amount);
+            // AI cleanup: open the TLS connection while the user talks.
+            crate::llm::commands::prewarm_if_enabled(&settings);
         }
         result
     }
@@ -588,6 +590,19 @@ impl Controller {
 
                 let result = result.map(|raw| transcribe::process(&raw, &settings, &dictionary));
                 perf_log::append("[ctrl] postprocess done");
+
+                // Optional AI cleanup (off by default). Always returns usable
+                // text: on any error/timeout it hands back the rule output.
+                let result = result.map(|mut outcome| {
+                    outcome.text = crate::llm::cleanup::maybe_cleanup(
+                        std::mem::take(&mut outcome.text),
+                        &settings,
+                        &dictionary,
+                        capture_target.app_name.as_deref(),
+                    )
+                    .text;
+                    outcome
+                });
 
                 // Extract text + stripped fillers so the rest of the match
                 // arms only deal with `String` like before.

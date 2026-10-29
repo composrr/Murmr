@@ -5,6 +5,7 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
+mod llm;
 mod notifications;
 mod perf_log;
 mod permissions;
@@ -1215,6 +1216,11 @@ pub fn run() {
             list_models,
             insert_edited,
             hide_hud_window,
+            // ---- AI cleanup (llm module) ----
+            llm::commands::llm_key_status,
+            llm::commands::llm_save_key,
+            llm::commands::llm_remove_key,
+            llm::commands::llm_test_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
