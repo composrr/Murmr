@@ -1638,8 +1638,8 @@ fn position_hud_near_caret(
 /// HUD window size while a live preview is shown (logical px): pill on top,
 /// a two-line transcript box under it, shadow room around both.
 const HUD_PREVIEW_SIZE: (f64, f64) = (560.0, 150.0);
-/// Normal recording HUD size — matches tauri.conf.json / create_hud_window.
-const HUD_NORMAL_SIZE: (f64, f64) = (380.0, 76.0);
+// HUD_NORMAL_SIZE (380×76) is defined once near the top of this file and
+// shared with the edit-last bubble sizing.
 /// Visible content height in preview layout: pill (40) + gap (8) + box (56).
 const PREVIEW_VISIBLE_HEIGHT_PX: i32 = 104;
 
