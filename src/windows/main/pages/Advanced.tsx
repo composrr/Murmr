@@ -166,7 +166,7 @@ export default function Advanced() {
         const onGpu = !!engine?.gpu_available && !settings.force_cpu;
         const advice = onGpu
           ? 'Recommended for your GPU.'
-          : 'Slow without a GPU: expect several seconds of waiting per sentence.';
+          : 'Slow without a GPU: around 10 seconds per dictation even on a fast CPU (Base takes under 1 second).';
         return (
           <div key={m.file} className="py-5 border-b border-border-hairline">
             <div className="flex items-center justify-between gap-6">
