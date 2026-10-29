@@ -180,6 +180,21 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub vad_enabled: bool,
     // ---- end engine block ----
+    // ---- AI cleanup (llm module) ----
+    /// Send each dictation (after the rule-based pass) to Claude Haiku for a
+    /// Wispr-Flow-style rewrite: punctuation, grammar, filler, lists. Uses
+    /// the user's own Anthropic API key from the OS keychain (never stored
+    /// here). Off by default; any failure falls back to the rule-based text.
+    #[serde(default)]
+    pub ai_cleanup: bool,
+
+    // ---- Command mode ----
+    /// Hotkey for command mode: select text, press it, speak an instruction
+    /// ("make this shorter") and the selection is rewritten by Claude. With
+    /// no selection the instruction writes new text at the cursor. Empty
+    /// string disables it (default). Uses the AI cleanup API key.
+    #[serde(default)]
+    pub command_hotkey: String,
 }
 
 fn default_true() -> bool {
@@ -265,6 +280,9 @@ impl Default for Settings {
             // ---- Engine (session A) ----
             vad_enabled: true,
             // ---- end engine block ----
+            ai_cleanup: false,
+
+            command_hotkey: String::new(),
         }
     }
 }

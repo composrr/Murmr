@@ -27,8 +27,9 @@ const WAVEFORM_BARS = 13;
 
 type HudView =
   | { kind: 'hidden' }
-  | { kind: 'recording'; startedAt: number }
-  | { kind: 'thinking' }
+  | { kind: 'recording'; startedAt: number; command?: boolean }
+  | { kind: 'thinking'; command?: boolean }
+  | { kind: 'command-notice'; message: string }
   | { kind: 'result'; text: string }
   | { kind: 'edit'; text: string }
   | { kind: 'no-speech' };
@@ -39,6 +40,9 @@ export default function HudApp() {
   const [display, setDisplay] = useState<HudDisplay>(DEFAULT_HUD_DISPLAY);
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
+  // Command mode: true from `command-recording` until the command ends, so
+  // re-emitted / self-healed `recording` events keep the command pill.
+  const commandRef = useRef(false);
   // Adaptive mic-level normalizer: maps raw RMS to [0,1] display levels that
   // fill the waveform's range regardless of how loud the device runs.
   const normalizerRef = useRef(createLevelNormalizer());
@@ -68,7 +72,13 @@ export default function HudApp() {
 
     const enterRecordingView = () => {
       if (lastSeenStateRef.current !== 'recording') resetCounters();
-      setView({ kind: 'recording', startedAt: Date.now() });
+      const command = commandRef.current;
+      // Keep the original start time on idempotent re-emits.
+      setView((v) =>
+        v.kind === 'recording' && !!v.command === command
+          ? v
+          : { kind: 'recording', startedAt: Date.now(), command },
+      );
       lastSeenStateRef.current = 'recording';
     };
 
@@ -92,6 +102,37 @@ export default function HudApp() {
 
     const onStatus = (status: DictationStatus) => {
       if (cancelled) return;
+      // ---- Command mode ----
+      if (status.kind === 'command-recording') {
+        commandRef.current = true;
+        enterRecordingView();
+        return;
+      }
+      if (status.kind === 'command-thinking') {
+        setView({ kind: 'thinking', command: true });
+        lastSeenStateRef.current = status.kind;
+        return;
+      }
+      if (status.kind === 'command-notice') {
+        commandRef.current = false;
+        setView({ kind: 'command-notice', message: status.message });
+        lastSeenStateRef.current = status.kind;
+        window.setTimeout(() => {
+          if (!cancelled) {
+            setView((v) => (v.kind === 'command-notice' ? { kind: 'hidden' } : v));
+          }
+        }, 2800);
+        return;
+      }
+      if (
+        status.kind === 'cancelled' ||
+        status.kind === 'injected' ||
+        status.kind === 'error' ||
+        status.kind === 'no-speech'
+      ) {
+        commandRef.current = false;
+      }
+
       if (status.kind === 'recording') {
         enterRecordingView();
       } else if (status.kind === 'transcribing') {
@@ -219,9 +260,11 @@ export default function HudApp() {
           startedAt={view.startedAt}
           showWaveform={display.waveform}
           showTimer={display.timer}
+          command={view.command}
         />
       )}
-      {view.kind === 'thinking' && <Thinking />}
+      {view.kind === 'thinking' && <Thinking label={view.command ? 'working on it' : undefined} />}
+      {view.kind === 'command-notice' && <Notice message={view.message} />}
       {view.kind === 'result' && (
         <ResultPopup text={view.text} onDismiss={() => setView({ kind: 'hidden' })} />
       )}
@@ -233,6 +276,25 @@ export default function HudApp() {
         />
       )}
       {view.kind === 'no-speech' && <NoSpeech />}
+    </div>
+  );
+}
+
+/// Command mode: transient message pill (no key, nothing heard, failed…).
+function Notice({ message }: { message: string }) {
+  return (
+    <div
+      className="flex items-center gap-[10px] rounded-full"
+      style={{
+        background: 'var(--hud-bg, #1f1f1c)',
+        padding: '11px 22px',
+        border: '0.5px solid rgba(255,255,255,0.06)',
+        boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
+        maxWidth: 460,
+      }}
+    >
+      <span className="block w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#6f9bf2' }} />
+      <span style={{ color: 'rgba(212,212,207,0.85)', fontSize: 13 }}>{message}</span>
     </div>
   );
 }

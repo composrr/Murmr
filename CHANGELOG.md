@@ -36,6 +36,32 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
   now hears the end of the previous piece (plus your dictionary words), so
   casing, punctuation and a sentence split across the cut come out right.
 <!-- end engine -->
+<!-- AI cleanup (ai-cleanup branch) -->
+### New
+
+- **AI cleanup (optional, off by default).** Turn it on in Preferences and add
+  your own Anthropic API key, and Murmr polishes each dictation with Claude
+  Haiku after its built-in rules: punctuation, grammar, filler words, false
+  starts, and lists or paragraphs when you clearly dictated one. It never
+  answers or acts on what you said, and it keeps your words. If the call is
+  slow (over ~2.5 s), fails, or no key is saved, Murmr types the rule-based
+  text as before. The key lives in your system keychain. When it's on, the
+  text of each dictation is sent to Anthropic; audio never leaves your
+  computer. Skipped in literal mode and for very short dictations.
+<!-- /AI cleanup -->
+
+<!-- Command mode (command-mode branch) -->
+- **Command mode (optional, off by default).** Bind a Command shortcut in
+  Hotkeys, select some text in any app, press it and say what to do: "make
+  this shorter", "turn this into bullets", "fix the grammar", "translate to
+  Spanish". Murmr replaces the selection with Claude's rewrite. With nothing
+  selected, say what to write ("write a polite reply saying I can't make it")
+  and it's typed at your cursor. Tap to start and stop, or hold while you
+  speak. Uses the same Anthropic API key as AI cleanup; the selected text and
+  your instruction are sent to Anthropic. If anything goes wrong (no key,
+  didn't hear you, slow, offline, you switched apps) the HUD says so and your
+  text and clipboard are left as they were.
+<!-- /Command mode -->
 
 ---
 

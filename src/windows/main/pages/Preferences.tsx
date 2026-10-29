@@ -17,6 +17,7 @@ import {
   SettingsHeader,
   Toggle,
 } from './settings-ui';
+import AiCleanupSection from './AiCleanupSection';
 
 const HUD_POSITIONS = [
   { value: 'near-input', label: 'Near input' },
@@ -199,6 +200,8 @@ export default function Preferences() {
       >
         <Toggle on={settings.fuzzy_dictionary} onChange={(v) => update({ fuzzy_dictionary: v })} />
       </Row>
+
+      <AiCleanupSection settings={settings} update={update} />
 
       <SectionHeader>Voice commands</SectionHeader>
       <Row name='"period" → .' hint="Spoken at end of utterance becomes punctuation">

@@ -5,6 +5,7 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
+mod llm;
 mod notifications;
 mod perf_log;
 mod permissions;
@@ -328,7 +329,8 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
         &new_settings.repeat_hotkey,
         &new_settings.edit_last_hotkey,
         &new_settings.cancel_hotkey,
-    );
+    )
+    .with_command(&new_settings.command_hotkey); // command mode
     hotkey::update_config(new_hotkeys);
     hotkey::set_pause_during_fullscreen(new_settings.pause_during_fullscreen);
 
@@ -1183,6 +1185,7 @@ pub fn run() {
                     &s.edit_last_hotkey,
                     &s.cancel_hotkey,
                 )
+                .with_command(&s.command_hotkey) // command mode
             };
             hotkey::spawn(hotkey_tx, initial_hotkeys);
             let sounds = SoundPlayer::new(Arc::clone(&settings), app.handle());
@@ -1287,6 +1290,11 @@ pub fn run() {
             delete_model,
             retry_gpu_detection,
             // ---- end engine ----
+            // ---- AI cleanup (llm module) ----
+            llm::commands::llm_key_status,
+            llm::commands::llm_save_key,
+            llm::commands::llm_remove_key,
+            llm::commands::llm_test_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

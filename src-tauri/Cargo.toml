@@ -80,13 +80,17 @@ thiserror = "2"
 crossbeam-channel = "0.5"
 regex = "1"
 
-# ---- Engine: in-app model download (session A) ----
-# reqwest/rustls are already in the tree via tauri-plugin-updater; we reuse
-# the same versions + TLS setup (ring provider) so this adds ~no build time.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream"] }
+# ---- HTTP (engine model download + AI cleanup Anthropic API) ----
+# reqwest/rustls are already in the tree via tauri-plugin-updater; reuse the
+# same versions + TLS setup (ring provider). `stream` is for model downloads,
+# `blocking` + `json` for the Anthropic API.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "stream", "blocking", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Engine: checksum verification for downloaded models.
 sha2 = "0.10"
-# ---- end engine block ----
+# AI cleanup: API key storage in Windows Credential Manager / macOS Keychain.
+keyring = { version = "3", features = ["windows-native", "apple-native"] }
+# ---- end HTTP block ----
 
 # Win32 APIs for HUD positioning (focus module).
 # - windows-sys: lightweight legacy bindings (GetGUIThreadInfo, GetForegroundWindow)

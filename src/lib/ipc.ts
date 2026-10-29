@@ -42,7 +42,11 @@ export type DictationStatus =
   | { kind: 'injected'; text: string; source_app: string | null }
   | { kind: 'cancelled' }
   | { kind: 'no-speech' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  // ---- Command mode ----
+  | { kind: 'command-recording' }
+  | { kind: 'command-thinking' }
+  | { kind: 'command-notice'; message: string };
 
 export function ping(): Promise<PingResponse> {
   return invoke<PingResponse>('ping');
@@ -290,6 +294,13 @@ export interface Settings {
   /** Drop silent stretches with Silero VAD before decoding. Default true. */
   vad_enabled: boolean;
   // ---- end engine block ----
+  // ---- AI cleanup (llm module) ----
+  /** Rewrite each dictation with Claude Haiku (user's own API key). Default false. */
+  ai_cleanup: boolean;
+
+  // ---- Command mode ----
+  /** Hotkey for command mode (rewrite the selection by voice). Empty = disabled. */
+  command_hotkey: string;
 }
 
 export function getSettings(): Promise<Settings> {
@@ -517,3 +528,35 @@ export function listenModelDownload(
   return listen<ModelDownloadProgress>('murmr:model-download', (event) => handler(event.payload));
 }
 // ---- end engine block ----
+// ----- AI cleanup (llm module) -----
+
+export interface LlmKeyStatus {
+  has_key: boolean;
+  /** Masked key for display, e.g. "sk-ant-…WXYZ". Never the full key. */
+  hint: string | null;
+}
+
+export interface LlmKeyTestResult {
+  ok: boolean;
+  latency_ms: number;
+  /** Cleaned sample text on success, a readable error otherwise. */
+  message: string;
+}
+
+export function llmKeyStatus(): Promise<LlmKeyStatus> {
+  return invoke<LlmKeyStatus>('llm_key_status');
+}
+
+/** Stores the key in the OS keychain (never in settings.json). */
+export function llmSaveKey(key: string): Promise<LlmKeyStatus> {
+  return invoke<LlmKeyStatus>('llm_save_key', { key });
+}
+
+export function llmRemoveKey(): Promise<void> {
+  return invoke<void>('llm_remove_key');
+}
+
+/** Runs a real cleanup on a sample. Pass `key` to test before saving. */
+export function llmTestKey(key?: string): Promise<LlmKeyTestResult> {
+  return invoke<LlmKeyTestResult>('llm_test_key', { key: key ?? null });
+}
