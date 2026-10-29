@@ -107,6 +107,32 @@ function findLibClang() {
   return null;
 }
 
+// Engine (session A): Ninja bundled with Visual Studio, at
+//   <VS root>\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe
+function findVSBundledNinja() {
+  const roots = [
+    'C:\\Program Files\\Microsoft Visual Studio',
+    'C:\\Program Files (x86)\\Microsoft Visual Studio',
+  ];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const major of readdirSync(root).sort().reverse()) {
+      const editionsDir = join(root, major);
+      let editions = [];
+      try {
+        editions = readdirSync(editionsDir);
+      } catch {
+        continue;
+      }
+      for (const edition of editions) {
+        const dir = join(editionsDir, edition, 'Common7', 'IDE', 'CommonExtensions', 'Microsoft', 'CMake', 'Ninja');
+        if (existsSync(join(dir, 'ninja.exe'))) return dir;
+      }
+    }
+  }
+  return null;
+}
+
 // Engine (session A): newest Vulkan SDK install (folder per version).
 function findVulkanSdk() {
   const roots = ['C:\\VulkanSDK', join(homedir(), 'VulkanSDK')];
@@ -198,6 +224,21 @@ if (platform === 'win32') {
       console.warn(
         '[run-tauri] Vulkan SDK not found. Install it from https://vulkan.lunarg.com/sdk/home#windows (whisper-rs-sys needs it for the GPU build).',
       );
+    }
+  }
+  // ggml-vulkan builds its shader generator as a nested CMake
+  // ExternalProject. Under the Visual Studio generator (VS 18 runs custom
+  // build steps in parallel) its install step can run before its configure
+  // step and the build fails ("Not a file: .../cmake_install.cmake"). Ninja
+  // orders the steps correctly; cmake-rs supplies the MSVC environment.
+  if (!env.CMAKE_GENERATOR) {
+    const ninja = which('ninja') ? 'PATH' : findVSBundledNinja();
+    if (ninja) {
+      if (ninja !== 'PATH') newPath.push(ninja);
+      extraEnv.CMAKE_GENERATOR = 'Ninja';
+      console.log(`[run-tauri] using the Ninja CMake generator (${ninja === 'PATH' ? 'ninja on PATH' : ninja})`);
+    } else {
+      console.warn('[run-tauri] ninja not found; the Vulkan build may fail under the Visual Studio generator.');
     }
   }
   // ---- end engine block ----
