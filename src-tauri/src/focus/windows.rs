@@ -88,6 +88,75 @@ pub fn refocus_window(id: isize) -> bool {
     unsafe { SetForegroundWindow(id as _) != 0 }
 }
 
+/// True if the captured window still exists.
+pub fn window_exists(id: isize) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
+    unsafe { IsWindow(id as _) != 0 }
+}
+
+/// Restore foreground to `id` and confirm it actually took. Used by the
+/// edit-last flow, which must call this while Murmr's HUD still owns the
+/// foreground: Windows only lets the current foreground process hand focus
+/// to another window, so once the HUD is hidden a plain
+/// `SetForegroundWindow` can silently fail (taskbar flash, no focus).
+///
+/// Tries `SetForegroundWindow` first, then the `AttachThreadInput` fallback,
+/// polling `GetForegroundWindow` until it matches or `timeout` passes.
+pub fn refocus_window_verified(id: isize, timeout: std::time::Duration) -> bool {
+    use std::time::Instant;
+    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, IsIconic, IsWindow, ShowWindow, SW_RESTORE,
+    };
+
+    let wait_for = |hwnd: isize, budget: std::time::Duration| -> bool {
+        let deadline = Instant::now() + budget;
+        loop {
+            if unsafe { GetForegroundWindow() } as isize == hwnd {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+
+    unsafe {
+        let hwnd = id as _;
+        if IsWindow(hwnd) == 0 {
+            return false;
+        }
+        if GetForegroundWindow() as isize == id {
+            return true;
+        }
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        SetForegroundWindow(hwnd);
+        if wait_for(id, timeout / 2) {
+            return true;
+        }
+
+        // Fallback: share the foreground thread's input state so Windows
+        // treats our request as coming from the foreground.
+        let fg = GetForegroundWindow();
+        let fg_thread = if fg.is_null() {
+            0
+        } else {
+            GetWindowThreadProcessId(fg, ptr::null_mut())
+        };
+        let me = GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, 1) != 0;
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+        if attached {
+            AttachThreadInput(me, fg_thread, 0);
+        }
+        wait_for(id, timeout / 2)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // UI Automation (preferred — covers virtually every modern app)
 // ---------------------------------------------------------------------------

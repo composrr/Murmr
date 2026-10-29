@@ -62,6 +62,27 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
   didn't hear you, slow, offline, you switched apps) the HUD says so and your
   text and clipboard are left as they were.
 <!-- /Command mode -->
+<!-- dict-learning: begin -->
+### New
+
+- **Murmr learns from your corrections.** When you fix a misheard name, brand
+  or term in the edit-last bubble, Murmr suggests adding it to your
+  Dictionary. Tap the "Add to dictionary" chip before Insert, or review
+  everything later under **Dictionary → Suggested** (Add or Dismiss).
+  Suggestions are never added on their own, and grammar or punctuation fixes
+  are ignored.
+- **Fix a past transcript from History.** Hover a transcript on Home and click
+  the pencil to correct it. The fix is saved and feeds the same suggestions.
+
+### Fixed
+
+- **The edit-last bubble now fits on screen.** Its text box and Insert / Copy /
+  Cancel buttons were clipped by the small HUD window.
+- **Edited text goes back to the right window more reliably.** Murmr now hands
+  focus back to the window you were in before hiding the bubble, and checks it
+  worked. If that window was closed, the corrected text is put on your
+  clipboard instead of being lost. Cancel also returns focus to that window.
+<!-- dict-learning: end -->
 
 ---
 

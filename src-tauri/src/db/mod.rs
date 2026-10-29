@@ -15,6 +15,7 @@ use serde::Serialize;
 const SCHEMA_V1: &str = include_str!("schema/001_initial.sql");
 const SCHEMA_V2: &str = include_str!("schema/002_filler_counts.sql");
 const SCHEMA_V3: &str = include_str!("schema/003_milestones_and_filler_events.sql");
+const SCHEMA_V4: &str = include_str!("schema/004_dictionary_suggestions.sql");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Transcription {
@@ -91,6 +92,12 @@ impl Db {
                 .map_err(|e| format!("apply schema v3: {e}"))?;
             conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
                 .map_err(|e| format!("record schema v3: {e}"))?;
+        }
+        if current_version < 4 {
+            conn.execute_batch(SCHEMA_V4)
+                .map_err(|e| format!("apply schema v4: {e}"))?;
+            conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
+                .map_err(|e| format!("record schema v4: {e}"))?;
         }
 
         Ok(())
@@ -1277,4 +1284,318 @@ fn civil_date_from_days(days: i64) -> i64 {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     y * 10000 + m * 100 + d
+}
+
+// ---------------------------------------------------------------------------
+// Dictionary suggestions (learned from the user's corrections)
+// ---------------------------------------------------------------------------
+
+/// A pending dictionary suggestion, as shown in the Dictionary page.
+#[derive(Debug, Clone, Serialize)]
+pub struct DictionarySuggestion {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub trigger: String,
+    pub expansion: Option<String>,
+    /// How many times the user has made this same correction.
+    pub count: i64,
+    pub example: Option<String>,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+}
+
+const SUGGESTION_COLS: &str =
+    "id, type, trigger, expansion, count, example, first_seen_at, last_seen_at";
+
+fn row_to_suggestion(row: &rusqlite::Row) -> rusqlite::Result<DictionarySuggestion> {
+    Ok(DictionarySuggestion {
+        id: row.get(0)?,
+        entry_type: row.get(1)?,
+        trigger: row.get(2)?,
+        expansion: row.get(3)?,
+        count: row.get(4)?,
+        example: row.get(5)?,
+        first_seen_at: row.get(6)?,
+        last_seen_at: row.get(7)?,
+    })
+}
+
+fn suggestion_key(entry_type: &str, trigger: &str, expansion: Option<&str>) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}",
+        entry_type,
+        trigger.trim().to_lowercase(),
+        expansion.unwrap_or("").trim().to_lowercase()
+    )
+}
+
+/// True when the dictionary already has an entry that covers this suggestion.
+fn dictionary_covers(conn: &Connection, entry_type: &str, trigger: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM dictionary_entries
+                       WHERE type = ?1 AND lower(trigger) = lower(?2))",
+        params![entry_type, trigger.trim()],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|n| n != 0)
+}
+
+/// Longest example sentence we keep for context.
+const MAX_EXAMPLE_CHARS: usize = 240;
+
+impl Db {
+    /// Record candidates from one correction. Each is deduped by key and its
+    /// repeat count bumped. Skips anything the dictionary already covers.
+    /// Returns the pending suggestions this correction touched (dismissed
+    /// ones stay dismissed and are not returned).
+    pub fn record_suggestions(
+        &self,
+        candidates: &[crate::learning::Candidate],
+        example: &str,
+    ) -> Result<Vec<DictionarySuggestion>, String> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let example: String = example.chars().take(MAX_EXAMPLE_CHARS).collect();
+        let now = unix_ms_now();
+        let mut conn = self.conn.lock();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("suggestion tx begin: {e}"))?;
+        let mut touched = Vec::new();
+        for c in candidates {
+            if dictionary_covers(&tx, c.kind, &c.trigger)
+                .map_err(|e| format!("suggestion dict check: {e}"))?
+            {
+                continue;
+            }
+            let key = suggestion_key(c.kind, &c.trigger, c.expansion.as_deref());
+            // An 'accepted' suggestion whose dictionary entry was later
+            // deleted becomes pending again (we got past the check above).
+            tx.execute(
+                "INSERT INTO dictionary_suggestions
+                     (type, trigger, expansion, key, count, status, example, first_seen_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, 'pending', ?5, ?6, ?6)
+                 ON CONFLICT(key) DO UPDATE SET
+                     count = count + 1,
+                     trigger = excluded.trigger,
+                     expansion = excluded.expansion,
+                     example = excluded.example,
+                     last_seen_at = excluded.last_seen_at,
+                     status = CASE WHEN status = 'accepted' THEN 'pending' ELSE status END",
+                params![c.kind, c.trigger, c.expansion, key, example, now],
+            )
+            .map_err(|e| format!("suggestion upsert: {e}"))?;
+            let row = tx
+                .query_row(
+                    &format!(
+                        "SELECT {SUGGESTION_COLS} FROM dictionary_suggestions
+                         WHERE key = ?1 AND status = 'pending'"
+                    ),
+                    params![key],
+                    row_to_suggestion,
+                )
+                .ok();
+            if let Some(s) = row {
+                touched.push(s);
+            }
+        }
+        tx.commit().map_err(|e| format!("suggestion commit: {e}"))?;
+        Ok(touched)
+    }
+
+    /// Drop candidates the user can't usefully be offered: already in the
+    /// dictionary, or previously dismissed. Read-only.
+    pub fn filter_new_candidates(
+        &self,
+        candidates: Vec<crate::learning::Candidate>,
+    ) -> Result<Vec<crate::learning::Candidate>, String> {
+        let conn = self.conn.lock();
+        let mut out = Vec::new();
+        for c in candidates {
+            if dictionary_covers(&conn, c.kind, &c.trigger)
+                .map_err(|e| format!("candidate dict check: {e}"))?
+            {
+                continue;
+            }
+            let key = suggestion_key(c.kind, &c.trigger, c.expansion.as_deref());
+            let dismissed: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM dictionary_suggestions
+                                   WHERE key = ?1 AND status = 'dismissed')",
+                    params![key],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|n| n != 0)
+                .map_err(|e| format!("candidate dismissed check: {e}"))?;
+            if !dismissed {
+                out.push(c);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Pending suggestions, most-repeated first.
+    pub fn list_pending_suggestions(&self) -> Result<Vec<DictionarySuggestion>, String> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SUGGESTION_COLS} FROM dictionary_suggestions
+                 WHERE status = 'pending'
+                 ORDER BY count DESC, last_seen_at DESC
+                 LIMIT 200"
+            ))
+            .map_err(|e| format!("prepare suggestions: {e}"))?;
+        let rows = stmt
+            .query_map([], row_to_suggestion)
+            .map_err(|e| format!("query suggestions: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("collect suggestions: {e}"))
+    }
+
+    /// Turn a suggestion into a real dictionary entry. Returns the entry id
+    /// (an existing one if the dictionary already had it).
+    pub fn accept_suggestion(&self, id: i64) -> Result<i64, String> {
+        let now = unix_ms_now();
+        let mut conn = self.conn.lock();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("accept tx begin: {e}"))?;
+        let (entry_type, trigger, expansion): (String, String, Option<String>) = tx
+            .query_row(
+                "SELECT type, trigger, expansion FROM dictionary_suggestions WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| format!("accept: suggestion {id} not found: {e}"))?;
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM dictionary_entries
+                 WHERE type = ?1 AND lower(trigger) = lower(?2) LIMIT 1",
+                params![entry_type, trigger],
+                |row| row.get(0),
+            )
+            .ok();
+        let entry_id = match existing {
+            Some(eid) => eid,
+            None => {
+                tx.execute(
+                    "INSERT INTO dictionary_entries
+                         (type, trigger, expansion, description, is_regex, enabled, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 'Learned from your corrections', 0, 1, ?4, ?4)",
+                    params![entry_type, trigger, expansion, now],
+                )
+                .map_err(|e| format!("accept insert: {e}"))?;
+                tx.last_insert_rowid()
+            }
+        };
+        tx.execute(
+            "UPDATE dictionary_suggestions SET status = 'accepted' WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("accept mark: {e}"))?;
+        tx.commit().map_err(|e| format!("accept commit: {e}"))?;
+        Ok(entry_id)
+    }
+
+    /// Hide a suggestion for good. Repeats of the same correction still
+    /// count, but it is never offered again.
+    pub fn dismiss_suggestion(&self, id: i64) -> Result<(), String> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE dictionary_suggestions SET status = 'dismissed' WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("dismiss suggestion: {e}"))?;
+        Ok(())
+    }
+
+    /// Replace a past transcript's text (History "Fix"). Returns the old
+    /// text so the caller can learn from the change. FTS stays in sync via
+    /// the `transcriptions_au` trigger.
+    pub fn update_transcription_text(&self, id: i64, text: &str) -> Result<String, String> {
+        let conn = self.conn.lock();
+        let old: String = conn
+            .query_row(
+                "SELECT text FROM transcriptions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("transcription {id} not found: {e}"))?;
+        let word_count = text.split_whitespace().count() as i64;
+        conn.execute(
+            "UPDATE transcriptions SET text = ?1, word_count = ?2 WHERE id = ?3",
+            params![text, word_count, id],
+        )
+        .map_err(|e| format!("update transcription: {e}"))?;
+        Ok(old)
+    }
+}
+
+#[cfg(test)]
+mod suggestion_tests {
+    use super::*;
+    use crate::learning::Candidate;
+
+    fn mem_db() -> Db {
+        let mut conn = Connection::open_in_memory().unwrap();
+        Db::apply_migrations(&mut conn).unwrap();
+        Db { conn: Mutex::new(conn) }
+    }
+
+    fn word(t: &str) -> Candidate {
+        Candidate { kind: "word", trigger: t.into(), expansion: None }
+    }
+
+    #[test]
+    fn dedupes_counts_accepts_and_dismisses() {
+        let db = mem_db();
+        let c = vec![
+            word("Kubernetes"),
+            Candidate {
+                kind: "replacement",
+                trigger: "cooper netties".into(),
+                expansion: Some("Kubernetes".into()),
+            },
+        ];
+        assert_eq!(db.record_suggestions(&c, "ex 1").unwrap().len(), 2);
+        let again = db.record_suggestions(&[word("kubernetes")], "ex 2").unwrap();
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0].count, 2, "case-insensitive dedupe bumps the count");
+
+        let pending = db.list_pending_suggestions().unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].count, 2, "most repeated first");
+
+        // Accept -> real entry; future candidates for it are filtered out.
+        let entry_id = db.accept_suggestion(pending[0].id).unwrap();
+        let dict = db.list_dictionary(None).unwrap();
+        assert!(dict.iter().any(|e| e.id == entry_id && e.entry_type == "word"));
+        assert!(db.record_suggestions(&[word("Kubernetes")], "x").unwrap().is_empty());
+        assert!(db.filter_new_candidates(vec![word("Kubernetes")]).unwrap().is_empty());
+
+        // Dismiss -> never offered again, even when repeated.
+        db.dismiss_suggestion(pending[1].id).unwrap();
+        assert!(db.list_pending_suggestions().unwrap().is_empty());
+        assert!(db.record_suggestions(&c[1..], "x").unwrap().is_empty());
+        assert!(db.filter_new_candidates(c[1..].to_vec()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn migration_is_idempotent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        Db::apply_migrations(&mut conn).unwrap();
+        conn.execute_batch(SCHEMA_V4).unwrap();
+    }
+
+    #[test]
+    fn update_transcription_returns_old_text() {
+        let db = mem_db();
+        let id = db.insert_transcription("hello cooper netties", 3, 1000, None).unwrap();
+        let old = db.update_transcription_text(id, "hello Kubernetes").unwrap();
+        assert_eq!(old, "hello cooper netties");
+        let found = db.search_transcriptions("\"Kubernetes\"", 10).unwrap();
+        assert_eq!(found.len(), 1, "FTS index follows the update");
+    }
 }

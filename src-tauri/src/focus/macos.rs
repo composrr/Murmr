@@ -144,3 +144,71 @@ pub fn ax_focused_element_rect() -> Option<ScreenRect> {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Edit-last target: the frontmost app, so edited text goes back into it.
+// ---------------------------------------------------------------------------
+
+/// PID of the frontmost application.
+pub fn frontmost_app_pid() -> Option<isize> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    unsafe {
+        let ws: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ws.is_null() {
+            return None;
+        }
+        let app: *mut AnyObject = msg_send![ws, frontmostApplication];
+        if app.is_null() {
+            return None;
+        }
+        let pid: i32 = msg_send![app, processIdentifier];
+        if pid <= 0 {
+            None
+        } else {
+            Some(pid as isize)
+        }
+    }
+}
+
+/// True if an app with this PID is still running.
+pub fn app_running(pid: isize) -> bool {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    unsafe {
+        let app: *mut AnyObject = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid as i32
+        ];
+        !app.is_null()
+    }
+}
+
+/// Re-activate the app with this PID and wait (up to `timeout`) for it to
+/// become frontmost. Call while Murmr is still the active app: macOS only
+/// honours activation requests from the active app.
+pub fn activate_app_verified(pid: isize, timeout: std::time::Duration) -> bool {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    let deadline = std::time::Instant::now() + timeout;
+    unsafe {
+        let app: *mut AnyObject = msg_send![
+            class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid as i32
+        ];
+        if app.is_null() {
+            return false;
+        }
+        // NSApplicationActivateIgnoringOtherApps = 1 << 1
+        let _: bool = msg_send![app, activateWithOptions: 2usize];
+    }
+    loop {
+        if frontmost_app_pid() == Some(pid) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}

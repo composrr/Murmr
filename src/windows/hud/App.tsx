@@ -270,6 +270,9 @@ export default function HudApp() {
       )}
       {view.kind === 'edit' && (
         <ResultPopup
+          // Remount when a different transcript is sent so the draft and
+          // the learning diff never mix two transcripts.
+          key={`edit:${view.text}`}
           text={view.text}
           editable
           onDismiss={() => setView({ kind: 'hidden' })}

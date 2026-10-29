@@ -560,3 +560,63 @@ export function llmRemoveKey(): Promise<void> {
 export function llmTestKey(key?: string): Promise<LlmKeyTestResult> {
   return invoke<LlmKeyTestResult>('llm_test_key', { key: key ?? null });
 }
+
+// ----- Dictionary learning (suggestions from the user's corrections) -----
+
+/** A dictionary entry Murmr thinks you want, from a correction you made. */
+export interface LearnCandidate {
+  kind: 'word' | 'replacement';
+  trigger: string;
+  expansion: string | null;
+}
+
+/** A pending suggestion stored in the database. */
+export interface DictionarySuggestion {
+  id: number;
+  type: 'word' | 'replacement';
+  trigger: string;
+  expansion: string | null;
+  /** How many times you've made this same correction. */
+  count: number;
+  example: string | null;
+  first_seen_at: number;
+  last_seen_at: number;
+}
+
+/** Candidates for an in-progress edit. Saves nothing. */
+export function previewCorrection(original: string, edited: string): Promise<LearnCandidate[]> {
+  return invoke<LearnCandidate[]>('preview_correction', { original, edited });
+}
+
+/** Record a correction; returns the pending suggestions it produced. */
+export function learnFromCorrection(
+  original: string,
+  edited: string,
+): Promise<DictionarySuggestion[]> {
+  return invoke<DictionarySuggestion[]>('learn_from_correction', { original, edited });
+}
+
+export function listDictionarySuggestions(): Promise<DictionarySuggestion[]> {
+  return invoke<DictionarySuggestion[]>('list_dictionary_suggestions');
+}
+
+/** Accept a suggestion; resolves to the new dictionary entry's id. */
+export function acceptDictionarySuggestion(id: number): Promise<number> {
+  return invoke<number>('accept_dictionary_suggestion', { id });
+}
+
+export function dismissDictionarySuggestion(id: number): Promise<void> {
+  return invoke<void>('dismiss_dictionary_suggestion', { id });
+}
+
+/** Fix a past transcript (History). Resolves to the suggestions it produced. */
+export function updateTranscriptionText(
+  id: number,
+  text: string,
+): Promise<DictionarySuggestion[]> {
+  return invoke<DictionarySuggestion[]>('update_transcription_text', { id, text });
+}
+
+export function listenSuggestionsChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen<null>('murmr:suggestions-changed', () => handler());
+}

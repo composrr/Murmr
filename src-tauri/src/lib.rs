@@ -6,6 +6,7 @@ mod focus;
 mod hotkey;
 mod injector;
 mod llm;
+mod learning;
 mod notifications;
 mod perf_log;
 mod permissions;
@@ -29,7 +30,7 @@ use tauri::{
 use crate::audio::InputDevice;
 use crate::controller::Controller;
 use crate::db::{
-    AppUsage, DayCount, Db, DictionaryEntry, FillerProgress, PersonalRecords, PhraseCount,
+    AppUsage, DayCount, Db, DictionaryEntry, DictionarySuggestion, FillerProgress, PersonalRecords, PhraseCount,
     ThemeMatch, Transcription, UsageTotals, WeekWpm, WordCount,
 };
 use crate::settings::{Settings, SettingsStore};
@@ -196,8 +197,16 @@ async fn reinsert_text(text: String, state: State<'_, AppState>) -> Result<(), S
 }
 
 /// Insert edited text from the edit-last bubble. The HUD was focused so the
-/// user could type; here we hide it, restore focus to the app they were in
-/// when they hit the edit hotkey, then inject.
+/// user could type; here we give focus back to the app they were in when
+/// they hit the edit hotkey, hide the HUD, then inject.
+///
+/// Order matters on Windows (and macOS): only the foreground app may hand
+/// focus to another window, so we refocus the target WHILE the HUD still
+/// owns the foreground, and only then hide it. Hiding first (the original
+/// order) can leave the focus request denied.
+///
+/// The text is never lost: if the original window is gone, it is put on the
+/// clipboard and the user is told.
 #[tauri::command]
 async fn insert_edited(
     text: String,
@@ -206,29 +215,171 @@ async fn insert_edited(
 ) -> Result<(), String> {
     let keystroke = state.settings.get().injection_mode == "keystroke";
     let target = crate::controller::take_edit_target();
-    if let Some(hud) = app.get_webview_window("hud") {
-        let _ = hud.hide();
-    }
     async_runtime::spawn_blocking(move || {
-        if let Some(id) = target {
-            crate::focus::refocus_window(id);
+        let hide_hud = || {
+            if let Some(hud) = app.get_webview_window("hud") {
+                let _ = hud.hide();
+            }
+            crate::controller::set_hud_edit_size(&app, false);
+        };
+        let Some(id) = target else {
+            // Platform without target capture: old behaviour.
+            hide_hud();
             std::thread::sleep(std::time::Duration::from_millis(80));
+            return crate::injector::inject_text(&text, keystroke);
+        };
+        if !crate::focus::edit_target_alive(id) {
+            hide_hud();
+            perf_log::append("[edit-last] target window is gone; copying edited text to clipboard");
+            let copied = arboard::Clipboard::new()
+                .and_then(|mut c| c.set_text(text.clone()))
+                .is_ok();
+            let body = if copied {
+                "The window you were editing for was closed. Your corrected text is on the clipboard."
+            } else {
+                "The window you were editing for was closed, so the corrected text could not be inserted."
+            };
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app.notification().builder().title("Murmr").body(body).show();
+            return Err("edit target window is gone".into());
         }
+        let focused =
+            crate::focus::restore_edit_target(id, std::time::Duration::from_millis(400));
+        hide_hud();
+        if !focused {
+            // Still inject: the target exists and Windows often activates it
+            // anyway once the HUD hides. Logged so field reports show it.
+            perf_log::append(
+                "[edit-last] could not confirm focus on the target window before injecting",
+            );
+        }
+        // Let the target settle (caret/IME) before the paste lands.
+        std::thread::sleep(std::time::Duration::from_millis(60));
         crate::injector::inject_text(&text, keystroke)
     })
     .await
     .map_err(|e| format!("background task panicked: {e}"))?
 }
 
-/// Hide the HUD window — used when the user cancels the edit-last bubble so
-/// the (temporarily focusable) HUD releases focus.
+/// Hide the HUD window: used when the user cancels the edit-last bubble so
+/// the (temporarily focusable) HUD releases focus. Focus goes back to the
+/// original window, same as Insert.
 #[tauri::command]
-fn hide_hud_window(app: AppHandle) {
-    if let Some(hud) = app.get_webview_window("hud") {
-        let _ = hud.hide();
-    }
-    crate::controller::take_edit_target();
+async fn hide_hud_window(app: AppHandle) -> Result<(), String> {
+    let target = crate::controller::take_edit_target();
+    async_runtime::spawn_blocking(move || {
+        if let Some(id) = target {
+            if crate::focus::edit_target_alive(id) {
+                let _ = crate::focus::restore_edit_target(
+                    id,
+                    std::time::Duration::from_millis(300),
+                );
+            }
+        }
+        if let Some(hud) = app.get_webview_window("hud") {
+            let _ = hud.hide();
+        }
+        crate::controller::set_hud_edit_size(&app, false);
+    })
+    .await
+    .map_err(|e| format!("background task panicked: {e}"))
 }
+
+// --- Dictionary learning (learn from the user's corrections) ---
+
+/// Dictionary candidates for an in-progress edit, without saving anything.
+/// Excludes words already in the dictionary and dismissed suggestions. The
+/// HUD calls this as the user types to offer "Add to dictionary".
+#[tauri::command]
+fn preview_correction(
+    original: String,
+    edited: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::learning::Candidate>, String> {
+    let candidates = crate::learning::suggest(&original, &edited);
+    state.db.filter_new_candidates(candidates)
+}
+
+/// Record a correction the user made (edit-last Insert or History fix).
+/// Returns the pending suggestions it produced or bumped.
+#[tauri::command]
+fn learn_from_correction(
+    original: String,
+    edited: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    learn_and_notify(&original, &edited, &app, &state.db)
+}
+
+fn learn_and_notify(
+    original: &str,
+    edited: &str,
+    app: &AppHandle,
+    db: &Db,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    let candidates = crate::learning::suggest(original, edited);
+    let touched = db.record_suggestions(&candidates, edited)?;
+    if !touched.is_empty() {
+        let _ = app.emit("murmr:suggestions-changed", ());
+    }
+    Ok(touched)
+}
+
+#[tauri::command]
+fn list_dictionary_suggestions(
+    state: State<'_, AppState>,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    state.db.list_pending_suggestions()
+}
+
+/// Accept a suggestion: it becomes a real dictionary entry. Returns its id.
+#[tauri::command]
+fn accept_dictionary_suggestion(
+    id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<i64, String> {
+    let entry_id = state.db.accept_suggestion(id)?;
+    let _ = app.emit("murmr:suggestions-changed", ());
+    Ok(entry_id)
+}
+
+#[tauri::command]
+fn dismiss_dictionary_suggestion(
+    id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.dismiss_suggestion(id)?;
+    let _ = app.emit("murmr:suggestions-changed", ());
+    Ok(())
+}
+
+/// Fix a past transcript from History. Saves the new text and learns from
+/// the change. Learning errors never block the save.
+#[tauri::command]
+fn update_transcription_text(
+    id: i64,
+    text: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("Transcript text can't be empty.".into());
+    }
+    let old = state.db.update_transcription_text(id, text)?;
+    match learn_and_notify(&old, text, &app, &state.db) {
+        Ok(s) => Ok(s),
+        Err(e) => {
+            perf_log::append(&format!("[learning] history fix learn failed: {e}"));
+            Ok(Vec::new())
+        }
+    }
+}
+
+// --- end Dictionary learning ---
 
 #[tauri::command]
 fn transcription_count(state: State<'_, AppState>) -> Result<i64, String> {
@@ -1295,6 +1446,14 @@ pub fn run() {
             llm::commands::llm_save_key,
             llm::commands::llm_remove_key,
             llm::commands::llm_test_key,
+            // --- Dictionary learning ---
+            preview_correction,
+            learn_from_correction,
+            list_dictionary_suggestions,
+            accept_dictionary_suggestion,
+            dismiss_dictionary_suggestion,
+            update_transcription_text,
+            // --- end Dictionary learning ---
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

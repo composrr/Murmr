@@ -115,6 +115,59 @@ pub fn refocus_window(_id: isize) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// Edit-last target (where edited text is re-injected)
+// ---------------------------------------------------------------------------
+
+/// Opaque handle to the place edited text should go back into: the
+/// foreground HWND on Windows, the frontmost app's PID on macOS.
+#[cfg(windows)]
+pub fn capture_edit_target() -> Option<isize> {
+    windows::foreground_window_id()
+}
+
+#[cfg(target_os = "macos")]
+pub fn capture_edit_target() -> Option<isize> {
+    macos::frontmost_app_pid()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn capture_edit_target() -> Option<isize> {
+    None
+}
+
+/// True if the captured edit target still exists (window open / app running).
+#[cfg(windows)]
+pub fn edit_target_alive(id: isize) -> bool {
+    windows::window_exists(id)
+}
+
+#[cfg(target_os = "macos")]
+pub fn edit_target_alive(id: isize) -> bool {
+    macos::app_running(id)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn edit_target_alive(_id: isize) -> bool {
+    true
+}
+
+/// Give focus back to the captured edit target and confirm it took.
+#[cfg(windows)]
+pub fn restore_edit_target(id: isize, timeout: std::time::Duration) -> bool {
+    windows::refocus_window_verified(id, timeout)
+}
+
+#[cfg(target_os = "macos")]
+pub fn restore_edit_target(id: isize, timeout: std::time::Duration) -> bool {
+    macos::activate_app_verified(id, timeout)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn restore_edit_target(_id: isize, _timeout: std::time::Duration) -> bool {
+    false
+}
+
 /// A capture of the window the user was focused on when dictation started.
 #[derive(Debug, Clone, Default)]
 pub struct CaptureTarget {
