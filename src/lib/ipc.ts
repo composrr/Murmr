@@ -42,7 +42,11 @@ export type DictationStatus =
   | { kind: 'injected'; text: string; source_app: string | null }
   | { kind: 'cancelled' }
   | { kind: 'no-speech' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  // ---- Command mode ----
+  | { kind: 'command-recording' }
+  | { kind: 'command-thinking' }
+  | { kind: 'command-notice'; message: string };
 
 export function ping(): Promise<PingResponse> {
   return invoke<PingResponse>('ping');
@@ -289,6 +293,10 @@ export interface Settings {
   // ---- AI cleanup (llm module) ----
   /** Rewrite each dictation with Claude Haiku (user's own API key). Default false. */
   ai_cleanup: boolean;
+
+  // ---- Command mode ----
+  /** Hotkey for command mode (rewrite the selection by voice). Empty = disabled. */
+  command_hotkey: string;
 }
 
 export function getSettings(): Promise<Settings> {

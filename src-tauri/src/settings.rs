@@ -180,6 +180,14 @@ pub struct Settings {
     /// here). Off by default; any failure falls back to the rule-based text.
     #[serde(default)]
     pub ai_cleanup: bool,
+
+    // ---- Command mode ----
+    /// Hotkey for command mode: select text, press it, speak an instruction
+    /// ("make this shorter") and the selection is rewritten by Claude. With
+    /// no selection the instruction writes new text at the cursor. Empty
+    /// string disables it (default). Uses the AI cleanup API key.
+    #[serde(default)]
+    pub command_hotkey: String,
 }
 
 fn default_true() -> bool {
@@ -263,6 +271,8 @@ impl Default for Settings {
             edit_last_hotkey: String::new(),
 
             ai_cleanup: false,
+
+            command_hotkey: String::new(),
         }
     }
 }

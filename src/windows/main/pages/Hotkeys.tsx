@@ -22,10 +22,11 @@ export default function Hotkeys() {
   const cancel = settings?.cancel_hotkey ?? 'Escape';
   const repeat = settings?.repeat_hotkey ?? '';
   const editLast = settings?.edit_last_hotkey ?? '';
+  const command = settings?.command_hotkey ?? ''; // command mode
 
   // Build the forbid list per-row: a key bound to one shortcut shouldn't be
   // re-bindable to another. Empty repeat/edit-last = no conflict to track.
-  const allBound = [dictation, cancel, repeat, editLast].filter((k) => k.length > 0);
+  const allBound = [dictation, cancel, repeat, editLast, command].filter((k) => k.length > 0);
 
   return (
     <div className="max-w-[640px]">
@@ -97,6 +98,37 @@ export default function Hotkeys() {
               onClick={() => update({ edit_last_hotkey: '' })}
               className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
               title="Disable edit-last shortcut"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      </Row>
+
+      {/* ---- Command mode ---- */}
+      <Row
+        name="Command shortcut"
+        hint={
+          command
+            ? `Select text, press ${displayName(command)}, and say what to do ("make this shorter", "translate to Spanish"). With nothing selected, say what to write. Needs your Anthropic API key (Preferences → AI cleanup); the text and your instruction are sent to Anthropic.`
+            : 'Rewrite selected text by voice ("make this shorter", "turn this into bullets"). Needs your Anthropic API key (Preferences → AI cleanup). Click the chip → press a key. Click "clear" to disable.'
+        }
+      >
+        <div className="flex items-center gap-2 w-[260px]">
+          <div className="flex-1">
+            <HotkeyCapture
+              value={command || 'click to set'}
+              onChange={(next) => update({ command_hotkey: next })}
+              allowBareModifiers
+              forbidden={allBound.filter((k) => k !== command)}
+              disabled={!settings}
+            />
+          </div>
+          {command && (
+            <button
+              onClick={() => update({ command_hotkey: '' })}
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              title="Disable command shortcut"
             >
               clear
             </button>

@@ -28,6 +28,19 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
   computer. Skipped in literal mode and for very short dictations.
 <!-- /AI cleanup -->
 
+<!-- Command mode (command-mode branch) -->
+- **Command mode (optional, off by default).** Bind a Command shortcut in
+  Hotkeys, select some text in any app, press it and say what to do: "make
+  this shorter", "turn this into bullets", "fix the grammar", "translate to
+  Spanish". Murmr replaces the selection with Claude's rewrite. With nothing
+  selected, say what to write ("write a polite reply saying I can't make it")
+  and it's typed at your cursor. Tap to start and stop, or hold while you
+  speak. Uses the same Anthropic API key as AI cleanup; the selected text and
+  your instruction are sent to Anthropic. If anything goes wrong (no key,
+  didn't hear you, slow, offline, you switched apps) the HUD says so and your
+  text and clipboard are left as they were.
+<!-- /Command mode -->
+
 ---
 
 ## v0.1.72 — Quick taps register instantly

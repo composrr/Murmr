@@ -159,6 +159,8 @@ pub struct HotkeyConfig {
     /// `None` disables the edit-last shortcut entirely.
     pub edit_last: Option<Chord>,
     pub cancel: Chord,
+    /// Command mode hotkey. `None` (the default) disables it.
+    pub command: Option<Chord>,
 }
 
 impl Default for HotkeyConfig {
@@ -174,7 +176,16 @@ impl Default for HotkeyConfig {
                 modifiers: ModifierSet::default(),
                 key: Key::Escape,
             },
+            command: None,
         }
+    }
+}
+
+impl HotkeyConfig {
+    /// Set the command-mode chord from its settings string (empty = off).
+    pub fn with_command(mut self, command: &str) -> Self {
+        self.command = parse_chord(command);
+        self
     }
 }
 
@@ -191,6 +202,11 @@ pub enum HotkeyEvent {
     RepeatLast,
     /// Pop the last transcript into an editable HUD bubble.
     EditLast,
+    // ---- Command mode ----
+    /// Command hotkey pressed: record a spoken instruction for the selection.
+    CommandDown { pressed_at: Instant },
+    /// Command hotkey released (drives tap-vs-hold like `DictationUp`).
+    CommandUp,
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +261,7 @@ pub fn config_from_strings(
         repeat: parse_chord(repeat),
         edit_last: parse_chord(edit_last),
         cancel: parse_chord(cancel).unwrap_or(defaults.cancel),
+        command: None,
     }
 }
 
@@ -426,6 +443,22 @@ fn pause_during_fullscreen_enabled() -> bool {
 // Listener
 // ---------------------------------------------------------------------------
 
+/// Live modifier state from the hook, for [`any_modifier_held`].
+static GLOBAL_MODIFIERS: std::sync::OnceLock<ModifierState> = std::sync::OnceLock::new();
+
+/// True while the user is physically holding Ctrl/Shift/Alt/Meta (as seen
+/// by our keyboard hook). Command mode waits for this to clear before it
+/// synthesizes Ctrl/Cmd+C, so a held Shift can't turn it into Ctrl+Shift+C.
+pub fn any_modifier_held() -> bool {
+    GLOBAL_MODIFIERS
+        .get()
+        .map(|m| {
+            let s = m.snapshot();
+            s.ctrl || s.shift || s.alt || s.meta
+        })
+        .unwrap_or(false)
+}
+
 #[derive(Default, Clone)]
 struct ModifierState {
     shift: Arc<AtomicBool>,
@@ -510,6 +543,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
     *config_handle().write() = initial_config;
 
     let modifiers = ModifierState::default();
+    let _ = GLOBAL_MODIFIERS.set(modifiers.clone());
     let mods_for_cb = modifiers.clone();
     let cfg_for_cb = config_handle();
     let pending = Arc::new(Mutex::new(PendingPress::default()));
@@ -699,6 +733,25 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                             .unwrap_or(false)
                         {
                             (Some(HotkeyEvent::EditLast), true)
+                        } else if cfg
+                            .command
+                            .as_ref()
+                            .map(|c| matches_chord(c, k))
+                            .unwrap_or(false)
+                        {
+                            // Command mode: consumed like re-paste/edit-last;
+                            // the matching release becomes CommandUp below.
+                            // OS auto-repeat while held (push-to-talk) sends
+                            // more presses of a key we already ate: ignore
+                            // them, or the controller would see a second tap.
+                            if suppressed_for_cb.lock().contains(&k) {
+                                (None, true)
+                            } else {
+                                (
+                                    Some(HotkeyEvent::CommandDown { pressed_at: Instant::now() }),
+                                    true,
+                                )
+                            }
                         } else if matches_chord(&cfg.cancel, k) {
                             // Cancel key (default Escape) — only suppress
                             // and fire EscDown when there's an actual
@@ -794,7 +847,11 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                             // whose press passed through (e.g. plain Ctrl+V
                             // when repeat is Ctrl+Shift+V) also has its
                             // release pass through.
-                            (None, true)
+                            if cfg.command.map(|c| c.key == k).unwrap_or(false) {
+                                (Some(HotkeyEvent::CommandUp), true)
+                            } else {
+                                (None, true)
+                            }
                         } else {
                             (None, false)
                         }
@@ -828,4 +885,21 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
             crate::perf_log::append("[hotkey] grab() returned — keyboard hook is no longer active");
         })
         .expect("failed to spawn hotkey thread");
+}
+
+// ---- Command mode ----
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn command_chord_is_off_by_default_and_parses() {
+        assert!(HotkeyConfig::default().command.is_none());
+        let base = config_from_strings("ControlRight", "", "", "Escape");
+        assert!(base.command.is_none());
+        assert!(base.with_command("").command.is_none());
+        let c = base.with_command("Ctrl+Shift+KeyK").command.expect("parses");
+        assert_eq!(c.key, Key::KeyK);
+        assert!(c.modifiers.ctrl && c.modifiers.shift && !c.modifiers.alt);
+    }
 }

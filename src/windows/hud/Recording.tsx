@@ -9,6 +9,8 @@ interface Props {
   showWaveform: boolean;
   /** Show the elapsed timer (Settings → hud_show_timer). */
   showTimer: boolean;
+  /** Command mode: blue dot + "Command" label instead of the red dot. */
+  command?: boolean;
 }
 
 export default function Recording({
@@ -16,6 +18,7 @@ export default function Recording({
   startedAt,
   showWaveform,
   showTimer,
+  command = false,
 }: Props) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -39,7 +42,13 @@ export default function Recording({
         boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
       }}
     >
-      <span className="block w-2 h-2 rounded-full" style={{ background: '#e85d4a' }} />
+      <span
+        className="block w-2 h-2 rounded-full"
+        style={{ background: command ? '#6f9bf2' : '#e85d4a' }}
+      />
+      {command && (
+        <span style={{ color: '#d4d4cf', fontSize: 13, fontWeight: 500 }}>Command</span>
+      )}
 
       {showWaveform && (
         <div className="flex items-end gap-[2px] h-[18px]">

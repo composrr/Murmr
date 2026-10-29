@@ -328,7 +328,8 @@ fn save_settings(new_settings: Settings, state: State<'_, AppState>) -> Result<(
         &new_settings.repeat_hotkey,
         &new_settings.edit_last_hotkey,
         &new_settings.cancel_hotkey,
-    );
+    )
+    .with_command(&new_settings.command_hotkey); // command mode
     hotkey::update_config(new_hotkeys);
     hotkey::set_pause_during_fullscreen(new_settings.pause_during_fullscreen);
 
@@ -1121,6 +1122,7 @@ pub fn run() {
                     &s.edit_last_hotkey,
                     &s.cancel_hotkey,
                 )
+                .with_command(&s.command_hotkey) // command mode
             };
             hotkey::spawn(hotkey_tx, initial_hotkeys);
             let sounds = SoundPlayer::new(Arc::clone(&settings), app.handle());

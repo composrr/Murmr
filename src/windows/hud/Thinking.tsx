@@ -1,4 +1,4 @@
-export default function Thinking() {
+export default function Thinking({ label = 'transcribing' }: { label?: string }) {
   return (
     <div
       className="flex items-center gap-[11px] rounded-full"
@@ -14,7 +14,7 @@ export default function Thinking() {
         <span style={dotStyle(1)} />
         <span style={dotStyle(2)} />
       </div>
-      <span style={{ color: 'rgba(212,212,207,0.75)', fontSize: 13 }}>transcribing</span>
+      <span style={{ color: 'rgba(212,212,207,0.75)', fontSize: 13 }}>{label}</span>
 
       {/* Inline keyframes so the HUD entry point doesn't need a separate stylesheet. */}
       <style>{`

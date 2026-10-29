@@ -66,6 +66,10 @@ use crate::settings::SettingsStore;
 use crate::sounds::SoundPlayer;
 use crate::transcribe::{self, Transcriber};
 
+// ---- Command mode (handler lives in its own file) ----
+#[path = "controller_command.rs"]
+mod command;
+
 /// Floor for the user-configurable tap-vs-hold threshold. Anything under
 /// this is too short to reliably distinguish a deliberate tap from a brief
 /// hold (KB latency + scheduler jitter eats most of the budget).
@@ -157,6 +161,13 @@ pub enum Status {
     /// a "didn't catch that" hint instead of vanishing silently.
     NoSpeech,
     Error { message: String },
+    // ---- Command mode ----
+    /// Recording a spoken command (HUD shows the command pill).
+    CommandRecording,
+    /// Transcribing the command / waiting for the model.
+    CommandThinking,
+    /// Short message for the HUD (no key, nothing heard, failed…).
+    CommandNotice { message: String },
 }
 
 pub struct Controller {
@@ -177,6 +188,9 @@ pub struct Controller {
     /// pasted into the focused field and NOT saved to the DB. Used by the
     /// onboarding wizard's Practice step.
     practice_mode: Arc<AtomicBool>,
+    /// Command mode: true while the current recording is a spoken command
+    /// (set by `CommandDown`, consumed by `complete_recording`).
+    command_active: Arc<AtomicBool>,
 }
 
 impl Controller {
@@ -207,6 +221,7 @@ impl Controller {
             last_injected: Arc::new(Mutex::new(seed)),
             capture_target: Arc::new(Mutex::new(None)),
             practice_mode,
+            command_active: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -324,6 +339,7 @@ impl Controller {
 
                 (HotkeyEvent::EscDown, RecState::HoldUncertain | RecState::Toggled) => {
                     perf_log::append("[ctrl] EscDown → cancel recording");
+                    self.command_active.store(false, Ordering::Relaxed); // command mode
                     let _ = self.recorder.cancel();
                     audio_duck::unduck();
                     state = RecState::Idle;
@@ -373,6 +389,44 @@ impl Controller {
                     self.edit_last();
                 }
                 (HotkeyEvent::EditLast, _) => {}
+
+                // ---- Command mode ----
+                (HotkeyEvent::CommandDown { pressed_at }, RecState::Idle) => {
+                    if self.start_command_recording() {
+                        state = RecState::HoldUncertain;
+                        press_at = Some(pressed_at);
+                    }
+                }
+                // Second press while a command is recording → stop + run.
+                (HotkeyEvent::CommandDown { .. }, RecState::HoldUncertain | RecState::Toggled)
+                    if self.command_active.load(Ordering::Relaxed) =>
+                {
+                    state = RecState::Idle;
+                    hotkey::set_recording_active(false);
+                    press_at = None;
+                    self.sounds.play_complete_chime();
+                    self.complete_recording();
+                }
+                (HotkeyEvent::CommandDown { .. }, _) => {}
+                // Release: hold-to-talk completes, a quick tap toggles.
+                (HotkeyEvent::CommandUp, RecState::HoldUncertain)
+                    if self.command_active.load(Ordering::Relaxed) =>
+                {
+                    let elapsed = press_at.map(|t| t.elapsed()).unwrap_or_default();
+                    let tap_threshold = Duration::from_millis(
+                        self.settings.get().tap_threshold_ms.max(MIN_TAP_THRESHOLD_MS) as u64,
+                    );
+                    if elapsed >= tap_threshold {
+                        state = RecState::Idle;
+                        hotkey::set_recording_active(false);
+                        press_at = None;
+                        self.sounds.play_complete_chime();
+                        self.complete_recording();
+                    } else {
+                        state = RecState::Toggled;
+                    }
+                }
+                (HotkeyEvent::CommandUp, _) => {}
             }
         }
     }
@@ -487,6 +541,11 @@ impl Controller {
     }
 
     fn complete_recording(&self) {
+        // Command mode: a spoken command, not a dictation.
+        if self.command_active.swap(false, Ordering::Relaxed) {
+            return self.complete_command();
+        }
+
         // Restore system audio volume FIRST so the chime/typing sounds the
         // user hears next aren't artificially quiet.
         audio_duck::unduck();
