@@ -58,13 +58,15 @@ pub const fn backend_kind() -> &'static str {
     }
 }
 
-/// The GPU whisper.cpp will pick when `use_gpu` is set — the first device of
-/// type GPU/IGPU in ggml's registry (mirrors `whisper_backend_init_gpu`).
-/// Calling this initializes ggml's backend registry.
-pub fn first_gpu_device() -> Option<String> {
+/// The GPU to use: the first real (non-virtual) device of type GPU/IGPU in
+/// ggml's registry. Returns its name and its index among GPU devices, which
+/// is what `WhisperContextParameters::gpu_device` expects (mirrors
+/// `whisper_backend_init_gpu`). Calling this initializes ggml's registry.
+pub fn first_gpu_device() -> Option<(String, i32)> {
     if !compiled_with_gpu() {
         return None;
     }
+    let mut gpu_index: i32 = -1;
     unsafe {
         let n = ggml_backend_dev_count();
         for i in 0..n {
@@ -76,17 +78,42 @@ pub fn first_gpu_device() -> Option<String> {
             if t == ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
                 || t == ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
             {
+                gpu_index += 1;
                 let desc = ggml_backend_dev_description(dev);
                 let name = if desc.is_null() {
                     "GPU".to_string()
                 } else {
                     CStr::from_ptr(desc).to_string_lossy().trim().to_string()
                 };
-                return Some(name);
+                if is_virtual_gpu(&name) {
+                    perf_log::append(&format!(
+                        "[gpu] skipping virtual/software GPU '{name}' (slower than the CPU)"
+                    ));
+                    continue;
+                }
+                return Some((name, gpu_index));
             }
         }
     }
     None
+}
+
+/// VM / software GPUs that technically run Metal or Vulkan but are far slower
+/// than the CPU (e.g. the macOS CI runner's paravirtual device decodes at
+/// 0.15x real time).
+fn is_virtual_gpu(name: &str) -> bool {
+    const VIRTUAL: &[&str] = &[
+        "paravirtual",
+        "microsoft basic render",
+        "llvmpipe",
+        "lavapipe",
+        "swiftshader",
+        "vmware",
+        "virtualbox",
+        "virtio",
+    ];
+    let n = name.to_lowercase();
+    VIRTUAL.iter().any(|v| n.contains(v))
 }
 
 // ---------------------------------------------------------------------------
@@ -287,12 +314,13 @@ pub fn maybe_run_probe_and_exit() {
 fn probe_in_this_process(model: &str) -> i32 {
     use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-    let Some(device) = first_gpu_device() else {
+    let Some((device, index)) = first_gpu_device() else {
         println!("MURMR_GPU_PROBE none");
         return 2;
     };
     let mut cp = WhisperContextParameters::default();
     cp.use_gpu(true);
+    cp.gpu_device(index);
     cp.flash_attn(true);
     let ctx = match WhisperContext::new_with_params(model, cp) {
         Ok(c) => c,

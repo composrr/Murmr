@@ -225,6 +225,9 @@ impl Transcriber {
         let gpu_dev = if use_gpu { gpu::first_gpu_device() } else { None };
         let mut cparams = WhisperContextParameters::default();
         cparams.use_gpu(gpu_dev.is_some());
+        if let Some((_, index)) = &gpu_dev {
+            cparams.gpu_device(*index);
+        }
         // Flash attention is a clear win on GPU backends; keep the CPU path
         // exactly as it was.
         cparams.flash_attn(gpu_dev.is_some());
@@ -232,7 +235,7 @@ impl Transcriber {
             .map_err(|e| format!("failed to load Whisper model at {model_path}: {e}"))?;
         drop(_guard);
         let backend = match gpu_dev {
-            Some(dev) => BackendInfo { kind: gpu::backend_kind().into(), device: Some(dev) },
+            Some((dev, _)) => BackendInfo { kind: gpu::backend_kind().into(), device: Some(dev) },
             None => BackendInfo::cpu(),
         };
         let vad = vad_model.and_then(|p| {
