@@ -15,6 +15,18 @@ pub const BENCH_ARG: &str = "--murmr-bench";
 
 pub fn maybe_run_bench_and_exit() {
     let args: Vec<String> = std::env::args().collect();
+    // ---- Live preview bench ----
+    if let Some(i) = args.iter().position(|a| a == PREVIEW_BENCH_ARG) {
+        let code = match run_preview(&args[i + 1..]) {
+            Ok(()) => 0,
+            Err(e) => {
+                println!("PREVIEW error: {e}");
+                1
+            }
+        };
+        std::process::exit(code);
+    }
+    // ---- end live preview bench ----
     let Some(i) = args.iter().position(|a| a == BENCH_ARG) else {
         return;
     };
@@ -134,4 +146,120 @@ fn word_errors(reference: &str, hypothesis: &str) -> (usize, usize) {
         prev = cur;
     }
     (prev[h.len()], r.len())
+}
+
+// ---------------------------------------------------------------------------
+// Live preview bench:
+//   murmr --murmr-bench-preview <model.bin> <audio.wav> [--cpu] [--cpu-preview]
+// Plays the WAV in real time through the real preview worker (as if spoken
+// into the mic), prints each HUD update, then — the moment "recording" stops —
+// runs the normal final pass and reports how long it took. A second final pass
+// with no preview running gives the baseline to compare against.
+// ---------------------------------------------------------------------------
+
+pub const PREVIEW_BENCH_ARG: &str = "--murmr-bench-preview";
+
+struct WavPlayback {
+    samples: Vec<f32>,
+    started: Instant,
+    done: std::sync::atomic::AtomicBool,
+}
+
+impl crate::live_preview::PreviewSource for WavPlayback {
+    fn peek(&self, from: usize) -> Option<crate::audio::capture::LiveAudio> {
+        if self.done.load(std::sync::atomic::Ordering::SeqCst) {
+            return None;
+        }
+        let n = ((self.started.elapsed().as_secs_f64() * 16_000.0) as usize).min(self.samples.len());
+        Some(crate::audio::capture::LiveAudio {
+            samples: self.samples[from.min(n)..n].to_vec(),
+            sample_rate: 16_000,
+            channels: 1,
+        })
+    }
+}
+
+fn run_preview(args: &[String]) -> Result<(), String> {
+    use crate::live_preview::{self, PreviewConfig};
+    use std::sync::Arc;
+
+    let model = args.first().ok_or("usage: --murmr-bench-preview <model> <wav> [--cpu]")?;
+    let wav = args.get(1).ok_or("missing wav path")?;
+    let use_gpu = !args.iter().any(|a| a == "--cpu");
+    let samples = read_wav_16k_mono(Path::new(wav))?;
+    let audio_s = samples.len() as f64 / 16_000.0;
+    let vad_path = Path::new(model)
+        .parent()
+        .map(|d| d.join(models::VAD_MODEL))
+        .filter(|p| p.is_file());
+    let t = Arc::new(Transcriber::new(model, use_gpu, vad_path.as_deref())?);
+    let cfg = if t.backend().is_gpu() && !args.iter().any(|a| a == "--cpu-preview") {
+        PreviewConfig::gpu()
+    } else {
+        PreviewConfig::cpu()
+    };
+    println!(
+        "PREVIEW model={} backend={} audio={audio_s:.2}s cfg={:?}",
+        t.model_name(),
+        t.backend().label(),
+        cfg
+    );
+    // Warm up so first-decode GPU setup doesn't skew either side.
+    let _ = t.transcribe(&samples[..samples.len().min(16_000 * 3)], None, false);
+
+    // Baseline final pass, nothing else running.
+    let t0 = Instant::now();
+    let base_text = crate::controller::transcribe_maybe_chunked(&t, &samples, None, false)?;
+    let base_ms = t0.elapsed().as_millis();
+
+    let src = Arc::new(WavPlayback {
+        samples: samples.clone(),
+        started: Instant::now(),
+        done: std::sync::atomic::AtomicBool::new(false),
+    });
+    let started = src.started;
+    let (stats_tx, stats_rx) = std::sync::mpsc::channel();
+    let first_text = Arc::new(parking_lot::Mutex::new(None::<f64>));
+    let first_text_w = Arc::clone(&first_text);
+    let handle = live_preview::start(
+        Arc::clone(&t),
+        src.clone(),
+        1,
+        None,
+        cfg,
+        move |u| {
+            let at = started.elapsed().as_secs_f64();
+            first_text_w.lock().get_or_insert(at);
+            println!("PREVIEW t={at:5.2}s stable=\"{}\" tentative=\"{}\"", u.stable, u.tentative);
+        },
+        move |st| {
+            let _ = stats_tx.send(st);
+        },
+    );
+    // "Speak" the whole file in real time.
+    std::thread::sleep(std::time::Duration::from_secs_f64(audio_s));
+    // Stop exactly like the controller: abort the preview, then final pass.
+    let t1 = Instant::now();
+    handle.stop();
+    src.done.store(true, std::sync::atomic::Ordering::SeqCst);
+    let final_text = crate::controller::transcribe_maybe_chunked(&t, &samples, None, false)?;
+    let final_ms = t1.elapsed().as_millis();
+    let stats = stats_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "preview worker did not finish")?;
+    let avg = if stats.decodes > 0 { stats.total_decode_ms / stats.decodes as u128 } else { 0 };
+    println!(
+        "PREVIEW stats decodes={} avg_decode={avg}ms max_decode={}ms skipped_ticks={} commits={} first_text_at={:.2}s",
+        stats.decodes,
+        stats.max_decode_ms,
+        stats.skipped_ticks,
+        stats.commits,
+        first_text.lock().unwrap_or(-1.0)
+    );
+    println!(
+        "PREVIEW final_after_stop={final_ms}ms baseline_final={base_ms}ms same_text={}",
+        final_text == base_text
+    );
+    println!("PREVIEW final_text={final_text}");
+    Ok(())
 }

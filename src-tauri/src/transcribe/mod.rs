@@ -7,6 +7,9 @@ pub mod gpu;
 pub mod models;
 pub mod bench;
 // ---- end engine block ----
+// ---- Live preview ----
+pub mod partial;
+// ---- end live preview ----
 
 pub use postprocess::{build_initial_prompt, process, ProcessOutcome};
 

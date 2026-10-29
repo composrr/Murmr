@@ -180,6 +180,13 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub vad_enabled: bool,
     // ---- end engine block ----
+
+    // ---- Live preview ----
+    /// Show rough text in the HUD while recording. `None` = automatic: on
+    /// when a GPU backend is in use, off on CPU. `Some(_)` = the user chose.
+    #[serde(default)]
+    pub live_preview: Option<bool>,
+    // ---- end live preview ----
 }
 
 fn default_true() -> bool {
@@ -265,6 +272,10 @@ impl Default for Settings {
             // ---- Engine (session A) ----
             vad_enabled: true,
             // ---- end engine block ----
+
+            // ---- Live preview ----
+            live_preview: None,
+            // ---- end live preview ----
         }
     }
 }

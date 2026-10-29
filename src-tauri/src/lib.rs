@@ -5,6 +5,7 @@ mod db;
 mod focus;
 mod hotkey;
 mod injector;
+mod live_preview; // Live preview (HUD transcript while recording)
 mod notifications;
 mod perf_log;
 mod permissions;

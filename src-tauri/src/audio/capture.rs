@@ -68,6 +68,24 @@ pub fn record_for_seconds_with_rms(
 struct Active {
     cmd_tx: crossbeam_channel::Sender<StreamCmd>,
     result_rx: crossbeam_channel::Receiver<Capture>,
+    /// Live view of the buffer the cpal callback appends to (live preview).
+    live: LiveBuffer,
+}
+
+/// Shared handle to the in-progress capture buffer.
+#[derive(Clone)]
+struct LiveBuffer {
+    buffer: Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Audio captured so far, as returned by [`Recorder::peek`].
+pub struct LiveAudio {
+    /// Interleaved samples from the requested offset to "now".
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 enum StreamCmd {
@@ -103,7 +121,7 @@ impl Recorder {
 
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
         let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<(), String>>(1);
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<LiveBuffer, String>>(1);
 
         // The cpal Stream type is !Send on Windows, so we have to park it on
         // its own thread and drive it via channels.
@@ -211,7 +229,11 @@ impl Recorder {
 
             let (stream, buffer, metadata) = match init {
                 Ok(parts) => {
-                    let _ = ready_tx.send(Ok(()));
+                    let _ = ready_tx.send(Ok(LiveBuffer {
+                        buffer: Arc::clone(&parts.1),
+                        sample_rate: parts.2.sample_rate,
+                        channels: parts.2.channels,
+                    }));
                     parts
                 }
                 Err(e) => {
@@ -233,12 +255,28 @@ impl Recorder {
             }
         });
 
-        ready_rx
+        let live = ready_rx
             .recv_timeout(Duration::from_millis(2500))
             .map_err(|_| "timed out waiting for capture thread to start".to_string())??;
 
-        *slot = Some(Active { cmd_tx, result_rx });
+        *slot = Some(Active { cmd_tx, result_rx, live });
         Ok(())
+    }
+
+    /// Copy of the audio captured so far, starting at interleaved sample
+    /// index `from` (live preview reads only what it hasn't committed yet).
+    /// `None` when not recording. Holds the buffer lock only for the copy.
+    pub fn peek(&self, from: usize) -> Option<LiveAudio> {
+        let live = self.active.lock().as_ref()?.live.clone();
+        let samples = {
+            let buf = live.buffer.lock();
+            buf.get(from.min(buf.len())..).map(|s| s.to_vec()).unwrap_or_default()
+        };
+        Some(LiveAudio {
+            samples,
+            sample_rate: live.sample_rate,
+            channels: live.channels,
+        })
     }
 
     /// Stop recording and return the captured buffer + metadata.
