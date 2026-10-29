@@ -7,6 +7,7 @@ mod hotkey;
 mod injector;
 mod llm;
 mod learning;
+mod live_preview; // Live preview (HUD transcript while recording)
 mod notifications;
 mod perf_log;
 mod permissions;
@@ -1338,7 +1339,23 @@ pub fn run() {
                 )
                 .with_command(&s.command_hotkey) // command mode
             };
-            hotkey::spawn(hotkey_tx, initial_hotkeys);
+            // Live preview self-test (debug builds only): drive one dictation
+            // through the real controller without installing a global
+            // keyboard hook (see live_preview::selftest).
+            #[cfg(debug_assertions)]
+            let selftest = std::env::var("MURMR_SELFTEST").is_ok();
+            #[cfg(not(debug_assertions))]
+            let selftest = false;
+            if selftest {
+                #[cfg(debug_assertions)]
+                live_preview::selftest::spawn(
+                    app.handle().clone(),
+                    hotkey_tx.clone(),
+                    Arc::clone(&practice_mode),
+                );
+            } else {
+                hotkey::spawn(hotkey_tx, initial_hotkeys);
+            }
             let sounds = SoundPlayer::new(Arc::clone(&settings), app.handle());
 
             engine.attach_app(app.handle().clone());

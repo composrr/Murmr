@@ -9,6 +9,7 @@ import {
 import Recording from './Recording';
 import Thinking from './Thinking';
 import ResultPopup from './ResultPopup';
+import LivePreviewText from './LivePreviewText'; // Live preview
 import { createLevelNormalizer } from '../../lib/waveform';
 
 /// Which elements of the recording pill to show. Mirrors the two
@@ -38,6 +39,12 @@ export default function HudApp() {
   const [view, setView] = useState<HudView>({ kind: 'hidden' });
   const [rmsHistory, setRmsHistory] = useState<number[]>(() => Array(WAVEFORM_BARS).fill(0));
   const [display, setDisplay] = useState<HudDisplay>(DEFAULT_HUD_DISPLAY);
+  // ---- Live preview: rough text while recording (never what gets pasted) ----
+  const [preview, setPreview] = useState<{ stable: string; tentative: string }>({
+    stable: '',
+    tentative: '',
+  });
+  // ---- end live preview ----
 
   const lastSeenStateRef = useRef<DictationStatus['kind']>('idle');
   // Command mode: true from `command-recording` until the command ends, so
@@ -68,6 +75,7 @@ export default function HudApp() {
     const resetCounters = () => {
       normalizerRef.current.reset();
       setRmsHistory(Array(WAVEFORM_BARS).fill(0));
+      setPreview({ stable: '', tentative: '' }); // Live preview: new take, clear text
     };
 
     const enterRecordingView = () => {
@@ -168,6 +176,13 @@ export default function HudApp() {
       });
     };
 
+    // Live preview: the Rust worker sends the whole display text each time.
+    const onLivePreview = (event: { payload: { stable: string; tentative: string } }) => {
+      if (cancelled) return;
+      if (lastSeenStateRef.current !== 'recording') return;
+      setPreview({ stable: event.payload.stable, tentative: event.payload.tentative });
+    };
+
     const onDebugResult = (event: { payload: { text: string } }) => {
       if (cancelled) return;
       setView({ kind: 'result', text: event.payload.text });
@@ -225,6 +240,7 @@ export default function HudApp() {
           listen<{ text: string }>('murmr:hud-debug-result', onDebugResult),
           listen<string>('murmr:edit-last', onEditLast),
           listen('murmr:hud-shown', onHudShown),
+          listen<{ stable: string; tentative: string }>('murmr:live-preview', onLivePreview),
         ]);
         if (cancelled) {
           // Component unmounted while we were attaching — undo each
@@ -279,6 +295,14 @@ export default function HudApp() {
         />
       )}
       {view.kind === 'no-speech' && <NoSpeech />}
+      {/* Live preview: under the pill while recording / finishing up */}
+      {(view.kind === 'recording' || view.kind === 'thinking') && (
+        <LivePreviewText
+          stable={preview.stable}
+          tentative={preview.tentative}
+          finishing={view.kind === 'thinking'}
+        />
+      )}
     </div>
   );
 }

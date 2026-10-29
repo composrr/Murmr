@@ -244,6 +244,23 @@ export default function Advanced() {
           ]}
         />
       </Row>
+      {/* ---- Live preview ---- */}
+      <Row
+        name="Live preview"
+        hint={
+          settings.live_preview === null
+            ? engine?.backend.kind && engine.backend.kind !== 'CPU'
+              ? 'Shows rough text in the HUD as you speak. On automatically with a GPU. Only the final pass is pasted.'
+              : 'Off automatically on CPU (it would compete with the final pass for the processor). You can turn it on anyway.'
+            : 'Shows rough text in the HUD as you speak. Only the final, accurate pass is pasted.'
+        }
+      >
+        <Toggle
+          on={settings.live_preview ?? (!!engine && engine.backend.kind !== 'CPU')}
+          onChange={(v) => update({ live_preview: v })}
+        />
+      </Row>
+      {/* ---- end live preview ---- */}
       <Row
         name="Skip silence"
         hint="Removes pauses before transcribing (Silero VAD). Fewer phantom words and repeat loops on long takes."

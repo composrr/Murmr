@@ -68,6 +68,24 @@ pub fn record_for_seconds_with_rms(
 struct Active {
     cmd_tx: crossbeam_channel::Sender<StreamCmd>,
     result_rx: crossbeam_channel::Receiver<Capture>,
+    /// Live view of the buffer the cpal callback appends to (live preview).
+    live: LiveBuffer,
+}
+
+/// Shared handle to the in-progress capture buffer.
+#[derive(Clone)]
+struct LiveBuffer {
+    buffer: Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Audio captured so far, as returned by [`Recorder::peek`].
+pub struct LiveAudio {
+    /// Interleaved samples from the requested offset to "now".
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 enum StreamCmd {
@@ -101,9 +119,17 @@ impl Recorder {
             return Err("already recording".into());
         }
 
+        // Live preview self-test (debug builds only): play a WAV in real time
+        // instead of opening the mic. Never compiled into release builds.
+        #[cfg(debug_assertions)]
+        if let Ok(wav) = std::env::var("MURMR_FAKE_MIC_WAV") {
+            *slot = Some(fake_mic::start(&wav, on_rms)?);
+            return Ok(());
+        }
+
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
         let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
-        let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<(), String>>(1);
+        let (ready_tx, ready_rx) = crossbeam_channel::bounded::<Result<LiveBuffer, String>>(1);
 
         // The cpal Stream type is !Send on Windows, so we have to park it on
         // its own thread and drive it via channels.
@@ -211,7 +237,11 @@ impl Recorder {
 
             let (stream, buffer, metadata) = match init {
                 Ok(parts) => {
-                    let _ = ready_tx.send(Ok(()));
+                    let _ = ready_tx.send(Ok(LiveBuffer {
+                        buffer: Arc::clone(&parts.1),
+                        sample_rate: parts.2.sample_rate,
+                        channels: parts.2.channels,
+                    }));
                     parts
                 }
                 Err(e) => {
@@ -233,12 +263,28 @@ impl Recorder {
             }
         });
 
-        ready_rx
+        let live = ready_rx
             .recv_timeout(Duration::from_millis(2500))
             .map_err(|_| "timed out waiting for capture thread to start".to_string())??;
 
-        *slot = Some(Active { cmd_tx, result_rx });
+        *slot = Some(Active { cmd_tx, result_rx, live });
         Ok(())
+    }
+
+    /// Copy of the audio captured so far, starting at interleaved sample
+    /// index `from` (live preview reads only what it hasn't committed yet).
+    /// `None` when not recording. Holds the buffer lock only for the copy.
+    pub fn peek(&self, from: usize) -> Option<LiveAudio> {
+        let live = self.active.lock().as_ref()?.live.clone();
+        let samples = {
+            let buf = live.buffer.lock();
+            buf.get(from.min(buf.len())..).map(|s| s.to_vec()).unwrap_or_default()
+        };
+        Some(LiveAudio {
+            samples,
+            sample_rate: live.sample_rate,
+            channels: live.channels,
+        })
     }
 
     /// Stop recording and return the captured buffer + metadata.
@@ -269,5 +315,69 @@ impl Recorder {
             .send(StreamCmd::Cancel)
             .map_err(|e| format!("failed to signal cancel: {e}"))?;
         Ok(())
+    }
+}
+
+/// Debug-only fake microphone for the live-preview self-test: streams a WAV
+/// into the capture buffer at real-time speed, exactly like cpal would.
+#[cfg(debug_assertions)]
+mod fake_mic {
+    use super::*;
+
+    pub(super) fn start(path: &str, on_rms: Option<RmsCallback>) -> Result<Active, String> {
+        let mut r = hound::WavReader::open(path).map_err(|e| format!("fake mic: {e}"))?;
+        let spec = r.spec();
+        let data: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => r.samples::<f32>().filter_map(Result::ok).collect(),
+            hound::SampleFormat::Int => {
+                let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
+                r.samples::<i32>().filter_map(Result::ok).map(|s| s as f32 / max).collect()
+            }
+        };
+        let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let live = LiveBuffer {
+            buffer: Arc::clone(&buffer),
+            sample_rate: spec.sample_rate,
+            channels: spec.channels,
+        };
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
+        let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
+        thread::spawn(move || {
+            let mut pos = 0;
+            let started = std::time::Instant::now();
+            let per_sec = spec.sample_rate as f64 * spec.channels as f64;
+            loop {
+                match cmd_rx.recv_timeout(Duration::from_millis(20)) {
+                    Ok(StreamCmd::Stop) => {
+                        let samples = std::mem::take(&mut *buffer.lock());
+                        let _ = result_tx.send(Capture {
+                            samples,
+                            sample_rate: spec.sample_rate,
+                            channels: spec.channels,
+                            device_name: "fake mic".into(),
+                        });
+                        return;
+                    }
+                    Ok(StreamCmd::Cancel) => return,
+                    Err(_) => {}
+                }
+                // Pace by wall-clock time (sleep granularity on Windows is
+                // ~16 ms). After the file ends, keep "recording" silence.
+                let due = (started.elapsed().as_secs_f64() * per_sec) as usize;
+                let due = due - due % spec.channels.max(1) as usize;
+                if due <= pos {
+                    continue;
+                }
+                let end = due.min(data.len());
+                let mut chunk: Vec<f32> = if pos < end { data[pos..end].to_vec() } else { Vec::new() };
+                chunk.resize(due - pos, 0.0);
+                pos = due;
+                if let Some(cb) = &on_rms {
+                    cb(block_rms(&chunk));
+                }
+                buffer.lock().extend_from_slice(&chunk);
+            }
+        });
+        Ok(Active { cmd_tx, result_rx, live })
     }
 }

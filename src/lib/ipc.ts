@@ -301,6 +301,11 @@ export interface Settings {
   // ---- Command mode ----
   /** Hotkey for command mode (rewrite the selection by voice). Empty = disabled. */
   command_hotkey: string;
+
+  // ---- Live preview ----
+  /** Rough text in the HUD while recording. null = automatic (on with a GPU, off on CPU). */
+  live_preview: boolean | null;
+  // ---- end live preview ----
 }
 
 export function getSettings(): Promise<Settings> {

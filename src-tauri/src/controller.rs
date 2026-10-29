@@ -203,6 +203,8 @@ pub struct Controller {
     /// the window the user was in when they began — not wherever focus
     /// happens to be when transcription finishes.
     capture_target: Arc<Mutex<Option<focus::CaptureTarget>>>,
+    /// Live preview worker for the current recording (None when off).
+    live_preview: Mutex<Option<crate::live_preview::LivePreview>>,
     /// When true, transcriptions are emitted via `murmr:status` but NOT
     /// pasted into the focused field and NOT saved to the DB. Used by the
     /// onboarding wizard's Practice step.
@@ -239,6 +241,7 @@ impl Controller {
             app,
             last_injected: Arc::new(Mutex::new(seed)),
             capture_target: Arc::new(Mutex::new(None)),
+            live_preview: Mutex::new(None),
             practice_mode,
             command_active: Arc::new(AtomicBool::new(false)),
         }
@@ -292,6 +295,10 @@ impl Controller {
                     // mode unexpectedly.
                     press_at = Some(pressed_at);
                     self.emit(Status::Recording);
+                    // Live preview: start the worker and size the HUD for
+                    // it BEFORE show_hud positions the window.
+                    let preview_on = self.start_live_preview(session);
+                    self.apply_hud_layout(preview_on);
                     self.show_hud();
                     self.sounds.play_start_click();
                     // Belt-and-suspenders watchdog: if NO release event
@@ -359,6 +366,7 @@ impl Controller {
                 (HotkeyEvent::EscDown, RecState::HoldUncertain | RecState::Toggled) => {
                     perf_log::append("[ctrl] EscDown → cancel recording");
                     self.command_active.store(false, Ordering::Relaxed); // command mode
+                    self.stop_live_preview();
                     let _ = self.recorder.cancel();
                     audio_duck::unduck();
                     state = RecState::Idle;
@@ -562,6 +570,11 @@ impl Controller {
     }
 
     fn complete_recording(&self) {
+        // Live preview: abort any in-flight partial decode so the final,
+        // full-accuracy pass below gets the GPU/CPU to itself. Done before the
+        // command-mode branch so a spoken command never leaves a preview running.
+        self.stop_live_preview();
+
         // Command mode: a spoken command, not a dictation.
         if self.command_active.swap(false, Ordering::Relaxed) {
             return self.complete_command();
@@ -1512,10 +1525,10 @@ fn position_hud_below_field(
         // itself stays visible.
         let max_pill_bottom = m_pos.y + m_size.height as i32 - 8;
         x = x.clamp(min_x, max_x);
-        let pill_bottom = y + PILL_TOP_OFFSET_PX + PILL_HEIGHT_PX;
+        let pill_bottom = y + PILL_TOP_OFFSET_PX + hud_visible_height();
         if pill_bottom > max_pill_bottom {
             // Not enough room below the field — flip the pill above it.
-            y = field.y - FIELD_GAP_PX - PILL_HEIGHT_PX - PILL_TOP_OFFSET_PX;
+            y = field.y - FIELD_GAP_PX - hud_visible_height() - PILL_TOP_OFFSET_PX;
             y = y.max(m_pos.y);
         }
     }
@@ -1617,3 +1630,113 @@ fn position_hud_near_caret(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ===========================================================================
+// Live preview (rough transcript in the HUD while recording)
+// ===========================================================================
+
+/// HUD window size while a live preview is shown (logical px): pill on top,
+/// a two-line transcript box under it, shadow room around both.
+const HUD_PREVIEW_SIZE: (f64, f64) = (560.0, 150.0);
+/// Normal recording HUD size — matches tauri.conf.json / create_hud_window.
+const HUD_NORMAL_SIZE: (f64, f64) = (380.0, 76.0);
+/// Visible content height in preview layout: pill (40) + gap (8) + box (56).
+const PREVIEW_VISIBLE_HEIGHT_PX: i32 = 104;
+
+static HUD_PREVIEW_LAYOUT: AtomicBool = AtomicBool::new(false);
+
+/// Height of the visible HUD content below its top padding, for the
+/// "flip above the field" check.
+fn hud_visible_height() -> i32 {
+    if HUD_PREVIEW_LAYOUT.load(Ordering::Relaxed) {
+        PREVIEW_VISIBLE_HEIGHT_PX
+    } else {
+        PILL_HEIGHT_PX
+    }
+}
+
+impl Controller {
+    /// Start the preview worker for this recording if enabled. Returns
+    /// whether it started. Never fails the recording.
+    fn start_live_preview(&self, session: u64) -> bool {
+        // A leftover worker must be stopped BEFORE the new one captures its
+        // abort generation.
+        self.stop_live_preview();
+        let s = self.settings.get();
+        let t = self.engine.current();
+        let on_gpu = t.backend().is_gpu();
+        if !s.live_preview.unwrap_or(on_gpu) {
+            return false;
+        }
+        // On CPU only light models are previewed: a turbo partial takes 4-8 s
+        // on a 12-core CPU and measurably delayed the final pass.
+        if !on_gpu && !t.is_lightweight() {
+            perf_log::append("[preview] skipped: large model on CPU (would slow the final pass)");
+            return false;
+        }
+        let cfg = if on_gpu {
+            crate::live_preview::PreviewConfig::gpu()
+        } else {
+            crate::live_preview::PreviewConfig::cpu()
+        };
+        let mut cfg = cfg;
+        cfg.speech_rms = VAD_RMS_THRESHOLD;
+        let dictionary = self.db.list_dictionary(None).unwrap_or_default();
+        let prompt = transcribe::build_initial_prompt(&dictionary);
+        let app = self.app.clone();
+        let backend = t.backend().kind.clone();
+        let source: Arc<dyn crate::live_preview::PreviewSource> = self.recorder.clone();
+        let handle = crate::live_preview::start(
+            t,
+            source,
+            session,
+            prompt,
+            cfg,
+            move |update| {
+                #[cfg(debug_assertions)]
+                perf_log::append(&format!(
+                    "[preview] update stable={:?} tentative={:?}",
+                    update.stable, update.tentative
+                ));
+                let _ = app.emit("murmr:live-preview", update);
+            },
+            move |st| {
+                perf_log::append(&format!(
+                    "[preview] session={session} backend={backend} decodes={} avg={}ms max={}ms skipped_ticks={} commits={} aborted={}",
+                    st.decodes,
+                    if st.decodes > 0 { st.total_decode_ms / st.decodes as u128 } else { 0 },
+                    st.max_decode_ms,
+                    st.skipped_ticks,
+                    st.commits,
+                    st.aborted
+                ));
+            },
+        );
+        *self.live_preview.lock() = Some(handle);
+        true
+    }
+
+    /// Stop the preview worker (aborts an in-flight decode). Non-blocking.
+    fn stop_live_preview(&self) {
+        if let Some(p) = self.live_preview.lock().take() {
+            p.stop();
+        }
+    }
+
+    /// Size the HUD for this recording (bigger when the preview is on).
+    /// Called before `show_hud`, whose positioning reads the window size.
+    fn apply_hud_layout(&self, preview: bool) {
+        HUD_PREVIEW_LAYOUT.store(preview, Ordering::Relaxed);
+        let (w, h) = if preview { HUD_PREVIEW_SIZE } else { HUD_NORMAL_SIZE };
+        if let Some(hud) = self.app.get_webview_window("hud") {
+            if let Err(e) = hud.set_size(tauri::LogicalSize::new(w, h)) {
+                perf_log::append(&format!("[hud] resize for preview={preview} failed: {e}"));
+            } else {
+                perf_log::append(&format!("[hud] layout preview={preview} size={w}x{h}"));
+            }
+        }
+    }
+}
+// ===========================================================================
+// end live preview
+// ===========================================================================

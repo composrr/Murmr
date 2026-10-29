@@ -195,6 +195,13 @@ pub struct Settings {
     /// string disables it (default). Uses the AI cleanup API key.
     #[serde(default)]
     pub command_hotkey: String,
+
+    // ---- Live preview ----
+    /// Show rough text in the HUD while recording. `None` = automatic: on
+    /// when a GPU backend is in use, off on CPU. `Some(_)` = the user chose.
+    #[serde(default)]
+    pub live_preview: Option<bool>,
+    // ---- end live preview ----
 }
 
 fn default_true() -> bool {
@@ -283,6 +290,10 @@ impl Default for Settings {
             ai_cleanup: false,
 
             command_hotkey: String::new(),
+
+            // ---- Live preview ----
+            live_preview: None,
+            // ---- end live preview ----
         }
     }
 }
