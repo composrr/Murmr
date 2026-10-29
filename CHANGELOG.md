@@ -37,6 +37,17 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
   casing, punctuation and a sentence split across the cut come out right.
 <!-- end engine -->
 
+<!-- live preview: begin -->
+### New
+
+- **Live preview.** While you dictate, the HUD shows your words as you say
+  them — settled words in full white, the still-changing end dimmed. It's a
+  preview only: what gets pasted is still the full-accuracy pass that runs when
+  you stop, and the preview never slows it down. On automatically when Murmr
+  uses your GPU; off on CPU (you can switch it on in Settings → Advanced for
+  the Base model).
+<!-- live preview: end -->
+
 ---
 
 ## v0.1.72 — Quick taps register instantly
