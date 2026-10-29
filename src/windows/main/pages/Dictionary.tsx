@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  acceptDictionarySuggestion,
   createDictionaryEntry,
   deleteDictionaryEntry,
+  dismissDictionarySuggestion,
   listDictionary,
+  listDictionarySuggestions,
+  listenSuggestionsChanged,
   updateDictionaryEntry,
   type DictionaryEntry,
+  type DictionarySuggestion,
   type DictionaryType,
 } from '../../../lib/ipc';
 
@@ -29,14 +34,55 @@ export default function Dictionary() {
   const [editing, setEditing] = useState<DictionaryEntry | 'new' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [suggestions, setSuggestions] = useState<DictionarySuggestion[]>([]);
+
   const refresh = () =>
     listDictionary()
       .then(setEntries)
       .catch((e) => setError(String(e)));
 
+  const refreshSuggestions = () =>
+    listDictionarySuggestions()
+      .then(setSuggestions)
+      .catch((e) => setError(String(e)));
+
   useEffect(() => {
     refresh();
+    refreshSuggestions();
+    // New corrections (HUD edit, History fix) arrive while this page is open.
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    listenSuggestionsChanged(() => {
+      refreshSuggestions();
+      refresh();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
   }, []);
+
+  const acceptSuggestion = async (s: DictionarySuggestion) => {
+    try {
+      await acceptDictionarySuggestion(s.id);
+      setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+      refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const dismissSuggestion = async (s: DictionarySuggestion) => {
+    try {
+      await dismissDictionarySuggestion(s.id);
+      setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,6 +124,14 @@ export default function Dictionary() {
           Words bias recognition; replacements and snippets are applied to every transcript.
         </span>
       </p>
+
+      {suggestions.length > 0 && (
+        <Suggested
+          items={suggestions}
+          onAccept={acceptSuggestion}
+          onDismiss={dismissSuggestion}
+        />
+      )}
 
       <div className="flex items-center gap-1 mb-[18px] pb-4 border-b border-border-hairline">
         <Chip active={filter === 'all'} onClick={() => setFilter('all')} count={counts.all} label="All" />
@@ -139,6 +193,69 @@ export default function Dictionary() {
         />
       )}
     </div>
+  );
+}
+
+function Suggested({
+  items,
+  onAccept,
+  onDismiss,
+}: {
+  items: DictionarySuggestion[];
+  onAccept: (s: DictionarySuggestion) => void;
+  onDismiss: (s: DictionarySuggestion) => void;
+}) {
+  return (
+    <section className="mb-[22px] rounded-card border border-border-hairline bg-bg-row px-4 pt-3 pb-1">
+      <div className="flex items-baseline justify-between mb-1">
+        <h2 className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium m-0">
+          Suggested
+          <span className="ml-[6px] normal-case tracking-normal">{items.length}</span>
+        </h2>
+        <span className="text-[11px] text-text-quaternary">
+          From words you corrected. Nothing is added until you accept it.
+        </span>
+      </div>
+      {items.map((s) => (
+        <div
+          key={s.id}
+          className="flex items-center gap-4 py-[10px] border-b border-border-hairline last:border-b-0"
+          title={s.example ? `You wrote: “${s.example}”` : undefined}
+        >
+          <span className="text-[9px] uppercase tracking-[0.6px] text-text-quaternary font-medium w-[92px]">
+            {TYPE_LABEL[s.type]}
+          </span>
+          <span className="font-serif text-[16px] text-text-primary flex-1 m-0 min-w-0 truncate">
+            {s.type === 'word' ? (
+              s.trigger
+            ) : (
+              <>
+                {s.trigger}
+                <span className="text-text-quaternary mx-2">→</span>
+                {s.expansion}
+              </>
+            )}
+          </span>
+          {s.count > 1 && (
+            <span className="text-[11px] text-text-tertiary tabular-nums whitespace-nowrap">
+              Fixed {s.count}×
+            </span>
+          )}
+          <button
+            onClick={() => onDismiss(s)}
+            className="text-[12px] text-text-secondary px-3 py-[5px] rounded-full hover:text-text-primary hover:bg-bg-control"
+          >
+            Dismiss
+          </button>
+          <button
+            onClick={() => onAccept(s)}
+            className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-[14px] py-[5px]"
+          >
+            Add
+          </button>
+        </div>
+      ))}
+    </section>
   );
 }
 

@@ -47,6 +47,22 @@ pub fn take_edit_target() -> Option<isize> {
     EDIT_TARGET.lock().take()
 }
 
+/// HUD size while the edit-last bubble is open (logical px). The normal
+/// 380×76 window clips the bubble's textarea and hides its buttons.
+const HUD_EDIT_SIZE: (f64, f64) = (540.0, 236.0);
+/// Normal HUD size — must match `create_hud_window` and tauri.conf.json.
+const HUD_NORMAL_SIZE: (f64, f64) = (380.0, 76.0);
+
+/// Grow the HUD for the edit bubble, or shrink it back to the pill size.
+pub fn set_hud_edit_size(app: &AppHandle, editing: bool) {
+    if let Some(hud) = app.get_webview_window("hud") {
+        let (w, h) = if editing { HUD_EDIT_SIZE } else { HUD_NORMAL_SIZE };
+        if let Err(e) = hud.set_size(tauri::LogicalSize::new(w, h)) {
+            perf_log::append(&format!("[hud] set_size({w}x{h}) failed: {e}"));
+        }
+    }
+}
+
 use crossbeam_channel::Receiver;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -432,10 +448,12 @@ impl Controller {
             return;
         }
         // Remember the app to re-inject into (current foreground — the HUD
-        // hasn't taken focus yet).
-        set_edit_target(focus::foreground_window_id());
-        // Tell the HUD to render the editable bubble, then show + focus it.
+        // hasn't taken focus yet). HWND on Windows, app PID on macOS.
+        set_edit_target(focus::capture_edit_target());
+        // Tell the HUD to render the editable bubble, then size, show + focus
+        // it. Resize before show_hud so it positions the larger window.
         let _ = self.app.emit("murmr:edit-last", text);
+        set_hud_edit_size(&self.app, true);
         self.show_hud();
         if let Some(hud) = self.app.get_webview_window("hud") {
             let _ = hud.set_focus();

@@ -6,6 +6,7 @@ import {
   recentTranscriptions,
   reinsertText,
   searchTranscriptions,
+  updateTranscriptionText,
   userInfo,
   type Transcription,
 } from '../../../lib/ipc';
@@ -119,6 +120,33 @@ export default function Home() {
     }
   };
 
+  // History fix: correct a past transcript. Murmr learns dictionary
+  // suggestions from the change (same as the edit-last bubble).
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const onSaveFix = async (entry: Transcription, text: string) => {
+    const next = text.trim();
+    if (!next || next === entry.text) {
+      setEditingId(null);
+      return;
+    }
+    try {
+      const learned = await updateTranscriptionText(entry.id, next);
+      setItems((prev) => prev.map((i) => (i.id === entry.id ? { ...i, text: next } : i)));
+      setEditingId(null);
+      const n = learned.length;
+      showToast({
+        kind: 'ok',
+        message:
+          n === 0
+            ? 'Saved'
+            : `Saved · ${n} dictionary suggestion${n === 1 ? '' : 's'} added to Dictionary`,
+      });
+    } catch (e) {
+      showToast({ kind: 'err', message: `Save failed: ${e}` });
+    }
+  };
+
   const onDelete = async (entry: Transcription) => {
     try {
       await deleteTranscription(entry.id);
@@ -194,9 +222,13 @@ export default function Home() {
               <Row
                 key={entry.id}
                 entry={entry}
+                editing={editingId === entry.id}
                 onCopy={() => onCopy(entry)}
                 onReinsert={() => onReinsert(entry)}
                 onDelete={() => onDelete(entry)}
+                onFix={() => setEditingId(entry.id)}
+                onCancelFix={() => setEditingId(null)}
+                onSaveFix={(text) => onSaveFix(entry, text)}
               />
             ))}
           </section>
@@ -221,15 +253,26 @@ export default function Home() {
 
 function Row({
   entry,
+  editing,
   onCopy,
   onReinsert,
   onDelete,
+  onFix,
+  onCancelFix,
+  onSaveFix,
 }: {
   entry: Transcription;
+  editing: boolean;
   onCopy: () => void;
   onReinsert: () => void;
   onDelete: () => void;
+  onFix: () => void;
+  onCancelFix: () => void;
+  onSaveFix: (text: string) => void;
 }) {
+  if (editing) {
+    return <FixRow entry={entry} onCancel={onCancelFix} onSave={onSaveFix} />;
+  }
   return (
     <article className="group flex items-start gap-5 py-4 border-b border-border-hairline last:border-b-0 relative">
       <span className="text-[12px] text-text-quaternary min-w-[64px] pt-[3px] tabular-nums">
@@ -238,7 +281,13 @@ function Row({
       <p className="font-serif text-[14px] leading-[1.6] text-text-primary flex-1 m-0">
         {entry.text}
       </p>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <ActionButton title="Fix a misheard word" onClick={onFix}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </ActionButton>
         <ActionButton title="Copy" onClick={onCopy}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -261,6 +310,61 @@ function Row({
             <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
           </svg>
         </ActionButton>
+      </div>
+    </article>
+  );
+}
+
+function FixRow({
+  entry,
+  onCancel,
+  onSave,
+}: {
+  entry: Transcription;
+  onCancel: () => void;
+  onSave: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState(entry.text);
+  return (
+    <article className="flex items-start gap-5 py-4 border-b border-border-hairline last:border-b-0">
+      <span className="text-[12px] text-text-quaternary min-w-[64px] pt-[9px] tabular-nums">
+        {formatTime(entry.created_at)}
+      </span>
+      <div className="flex-1 flex flex-col gap-2">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+          rows={Math.min(6, Math.max(2, Math.ceil(entry.text.length / 80)))}
+          spellCheck={false}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              onSave(draft);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          className="w-full font-serif text-[14px] leading-[1.6] text-text-primary px-3 py-[6px] rounded-[8px] border border-border-control bg-bg-row resize-y focus:outline-none focus:border-text-quaternary"
+        />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-text-quaternary mr-auto">
+            Fix misheard names or terms and Murmr will suggest dictionary entries.
+          </span>
+          <button
+            onClick={onCancel}
+            className="text-[12px] text-text-secondary px-3 py-[5px] rounded-full hover:text-text-primary"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(draft)}
+            className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-[14px] py-[5px]"
+          >
+            Save
+          </button>
+        </div>
       </div>
     </article>
   );
