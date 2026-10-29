@@ -405,7 +405,9 @@ impl Agreement {
                 .take_while(|(a, b)| norm(a) == norm(b))
                 .count();
             if lcp > n_stable {
-                self.stable = cur[..lcp].to_vec();
+                // Append only the newly agreed words; already-shown stable
+                // words keep their exact form (punctuation included).
+                self.stable.extend_from_slice(&cur[n_stable..lcp]);
             }
         }
         // Tentative = the newest hypothesis past what's already stable.
@@ -429,10 +431,13 @@ mod tests {
         assert_eq!(a.update("hello"), ("".into(), "hello".into()));
         assert_eq!(a.update("hello there"), ("hello".into(), "there".into()));
         assert_eq!(a.update("hello there my friend"), ("hello there".into(), "my friend".into()));
+        // Punctuation changes inside stable text don't alter what's shown.
+        let (s2, _) = a.update("hello there, my friend");
+        assert_eq!(s2, "hello there my friend");
         // Whisper revises an already-stable word: stable stays as shown.
         let (s, t) = a.update("Hello, they're my friend and");
-        assert_eq!(s, "hello there");
-        assert_eq!(t, "my friend and");
+        assert_eq!(s, "hello there my friend");
+        assert_eq!(t, "and");
     }
 
     #[test]

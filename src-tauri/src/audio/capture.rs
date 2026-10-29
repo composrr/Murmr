@@ -342,9 +342,10 @@ mod fake_mic {
         };
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<StreamCmd>();
         let (result_tx, result_rx) = crossbeam_channel::bounded::<Capture>(1);
-        let block = (spec.sample_rate as usize * spec.channels as usize) / 50; // 20 ms
         thread::spawn(move || {
             let mut pos = 0;
+            let started = std::time::Instant::now();
+            let per_sec = spec.sample_rate as f64 * spec.channels as f64;
             loop {
                 match cmd_rx.recv_timeout(Duration::from_millis(20)) {
                     Ok(StreamCmd::Stop) => {
@@ -360,14 +361,17 @@ mod fake_mic {
                     Ok(StreamCmd::Cancel) => return,
                     Err(_) => {}
                 }
-                // After the file ends, keep "recording" silence.
-                let end = (pos + block).min(data.len());
-                let chunk: Vec<f32> = if pos < end {
-                    data[pos..end].to_vec()
-                } else {
-                    vec![0.0; block]
-                };
-                pos = end;
+                // Pace by wall-clock time (sleep granularity on Windows is
+                // ~16 ms). After the file ends, keep "recording" silence.
+                let due = (started.elapsed().as_secs_f64() * per_sec) as usize;
+                let due = due - due % spec.channels.max(1) as usize;
+                if due <= pos {
+                    continue;
+                }
+                let end = due.min(data.len());
+                let mut chunk: Vec<f32> = if pos < end { data[pos..end].to_vec() } else { Vec::new() };
+                chunk.resize(due - pos, 0.0);
+                pos = due;
                 if let Some(cb) = &on_rms {
                     cb(block_rms(&chunk));
                 }
