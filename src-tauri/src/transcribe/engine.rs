@@ -17,7 +17,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use super::gpu::{self, GpuVerdict};
-use super::models::{self, BASE_MODEL, VAD_MODEL};
+use super::models::{self, BASE_MODEL, BEST_MODEL, VAD_MODEL};
 use super::{BackendInfo, Transcriber};
 use crate::perf_log;
 use crate::settings::SettingsStore;
@@ -65,6 +65,8 @@ pub struct Engine {
     resolve: fn(&str) -> PathBuf,
     app: Mutex<Option<AppHandle>>,
     retry_requested: AtomicBool,
+    /// The background download of the best model was started this launch.
+    best_fetch_started: AtomicBool,
 }
 
 impl Engine {
@@ -113,6 +115,7 @@ impl Engine {
             resolve,
             app: Mutex::new(None),
             retry_requested: AtomicBool::new(false),
+            best_fetch_started: AtomicBool::new(false),
         });
         engine.refresh_status_fields();
 
@@ -126,6 +129,7 @@ impl Engine {
                     e.refresh_status_fields();
                     e.emit_status();
                     e.reload_blocking();
+                    e.maybe_fetch_best_model();
                 })
                 .map_err(|e| format!("spawn probe thread: {e}"))?;
         } else if engine.current().backend().is_gpu() {
@@ -135,8 +139,9 @@ impl Engine {
     }
 
     /// Give the engine an AppHandle so it can emit status events.
-    pub fn attach_app(&self, app: AppHandle) {
+    pub fn attach_app(self: &Arc<Self>, app: AppHandle) {
         *self.app.lock() = Some(app);
+        self.maybe_fetch_best_model();
     }
 
     /// The model to use for one dictation. Hold it until the dictation ends.
@@ -154,7 +159,45 @@ impl Engine {
         let e = Arc::clone(self);
         let _ = std::thread::Builder::new()
             .name("murmr-model-load".into())
-            .spawn(move || e.reload_blocking());
+            .spawn(move || {
+                e.reload_blocking();
+                e.maybe_fetch_best_model();
+            });
+    }
+
+    /// "Automatic" model + a usable GPU + the best model not on disk yet →
+    /// download it in the background (once per launch), then swap to it.
+    /// Dictation keeps working on the current model meanwhile. A failed or
+    /// cancelled download is retried on the next launch.
+    fn maybe_fetch_best_model(self: &Arc<Self>) {
+        let s = self.settings.get();
+        let gpu_ok = self.verdict.lock().as_ref().map(|v| v.ok).unwrap_or(false);
+        if !s.auto_model || !gpu_ok || s.force_cpu {
+            return;
+        }
+        if models::downloaded_path(BEST_MODEL).is_some() {
+            return;
+        }
+        // Wait for the AppHandle so the download can report progress.
+        let Some(app) = self.app.lock().clone() else { return };
+        if self.best_fetch_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let e = Arc::clone(self);
+        let _ = std::thread::Builder::new()
+            .name("murmr-best-model".into())
+            .spawn(move || {
+                perf_log::append("[engine] auto model: downloading the best model in the background");
+                let res = tauri::async_runtime::block_on(models::download(BEST_MODEL, move |p| {
+                    let _ = app.emit("murmr:model-download", p);
+                }));
+                match res {
+                    Ok(_) => e.reload_blocking(),
+                    Err(err) => perf_log::append(&format!(
+                        "[engine] auto model: download failed ({err}); will retry next launch"
+                    )),
+                }
+            });
     }
 
     /// Forget the GPU verdict; the next launch checks the GPU again.
@@ -169,11 +212,19 @@ impl Engine {
 
     fn wanted_for(s: &crate::settings::Settings, verdict: Option<&GpuVerdict>) -> Wanted {
         let gpu_ok = verdict.map(|v| v.ok).unwrap_or(false);
-        Wanted {
-            model: s.model_name.clone(),
-            gpu: gpu_ok && !s.force_cpu && !gpu::drivers_disabled(),
-            vad: s.vad_enabled,
-        }
+        let gpu = gpu_ok && !s.force_cpu && !gpu::drivers_disabled();
+        // Automatic: the big model only when it can run on the GPU (it takes
+        // ~10 s per dictation on a CPU), and only once it's downloaded.
+        let model = if s.auto_model {
+            if gpu && models::downloaded_path(BEST_MODEL).is_some() {
+                BEST_MODEL.to_string()
+            } else {
+                BASE_MODEL.to_string()
+            }
+        } else {
+            s.model_name.clone()
+        };
+        Wanted { model, gpu, vad: s.vad_enabled }
     }
 
     fn vad_path(resolve: fn(&str) -> PathBuf) -> Option<PathBuf> {

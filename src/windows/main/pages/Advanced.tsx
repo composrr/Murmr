@@ -34,6 +34,7 @@ import {
 } from './settings-ui';
 
 const BASE_MODEL = 'ggml-base.en.bin';
+const AUTO = '__auto__';
 
 function formatMB(bytes: number): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
@@ -77,6 +78,7 @@ export default function Advanced() {
       listenModelDownload((p) => {
         setDownload(p.state === 'done' || p.state === 'cancelled' ? null : p);
         if (p.state === 'error') setDownloadError(p.error ?? 'Download failed');
+        if (p.state === 'done') refreshModels();
       }),
     ];
     return () => {
@@ -99,10 +101,11 @@ export default function Advanced() {
         setDownload(null);
         refreshModels();
         // The user asked for this model — switch to it (hot-swaps, no restart).
+        // On Automatic, saving just re-checks and picks it up if it fits.
         // Re-read settings first: they may have changed during the download.
         getSettings()
           .then((cur) => {
-            const next = { ...cur, model_name: m.file };
+            const next = cur.auto_model ? cur : { ...cur, model_name: m.file };
             setSettings(next);
             return saveSettings(next);
           })
@@ -144,19 +147,33 @@ export default function Advanced() {
             ? `Loading ${modelLabel(engine.loading)}…`
             : engine?.last_error
               ? `Couldn't load that model — still using ${modelLabel(engine.model_name)}.`
-              : engine && engine.model_name !== settings.model_name
-                ? `Using ${modelLabel(engine.model_name)} (the selected model couldn't be loaded).`
-                : 'Changes apply immediately.'
+              : settings.auto_model
+                ? engine
+                  ? `Using ${modelLabel(engine.model_name)}.` +
+                    (download?.file && download.file !== engine.model_name
+                      ? ` Downloading ${modelLabel(download.file)} — Murmr switches to it when it's done.`
+                      : '')
+                  : 'Murmr picks the most accurate model your computer can run quickly.'
+                : engine && engine.model_name !== settings.model_name
+                  ? `Using ${modelLabel(engine.model_name)} (the selected model couldn't be loaded).`
+                  : 'Changes apply immediately.'
         }
       >
         <NativeSelect
-          value={settings.model_name}
+          value={settings.auto_model ? AUTO : settings.model_name}
           disabled={!!engine?.loading}
-          onChange={(v) => update({ model_name: String(v) })}
-          options={(models.includes(settings.model_name)
-            ? models
-            : [settings.model_name, ...models]
-          ).map((name) => ({ value: name, label: modelLabel(name) }))}
+          onChange={(v) =>
+            String(v) === AUTO
+              ? update({ auto_model: true })
+              : update({ auto_model: false, model_name: String(v) })
+          }
+          options={[
+            { value: AUTO, label: 'Automatic (recommended)' },
+            ...(models.includes(settings.model_name)
+              ? models
+              : [settings.model_name, ...models]
+            ).map((name) => ({ value: name, label: modelLabel(name) })),
+          ]}
         />
       </Row>
 
@@ -186,11 +203,16 @@ export default function Advanced() {
                   </SecondaryButton>
                 ) : m.downloaded ? (
                   <>
-                    {settings.model_name !== m.file && (
-                      <SecondaryButton onClick={() => update({ model_name: m.file })}>Use</SecondaryButton>
+                    {engine?.model_name !== m.file && (
+                      <SecondaryButton onClick={() => update({ auto_model: false, model_name: m.file })}>
+                        Use
+                      </SecondaryButton>
                     )}
                     <SecondaryButton
-                      disabled={settings.model_name === m.file || engine?.model_name === m.file}
+                      disabled={
+                        (!settings.auto_model && settings.model_name === m.file) ||
+                        engine?.model_name === m.file
+                      }
                       onClick={() =>
                         deleteModel(m.file)
                           .then(refreshModels)
@@ -248,15 +270,11 @@ export default function Advanced() {
       <Row
         name="Live preview"
         hint={
-          settings.live_preview === null
-            ? engine?.backend.kind && engine.backend.kind !== 'CPU'
-              ? 'Shows rough text in the HUD as you speak. On automatically with a GPU. Only the final pass is pasted.'
-              : 'Off automatically on CPU (it would compete with the final pass for the processor). You can turn it on anyway.'
-            : 'Shows rough text in the HUD as you speak. Only the final, accurate pass is pasted.'
+          'Shows rough text in the HUD as you speak. Only the final, accurate pass is pasted. Works best with a GPU.'
         }
       >
         <Toggle
-          on={settings.live_preview ?? (!!engine && engine.backend.kind !== 'CPU')}
+          on={settings.live_preview ?? false}
           onChange={(v) => update({ live_preview: v })}
         />
       </Row>

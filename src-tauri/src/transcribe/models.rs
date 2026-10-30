@@ -19,6 +19,8 @@ use crate::perf_log;
 
 pub const BASE_MODEL: &str = "ggml-base.en.bin";
 pub const VAD_MODEL: &str = "ggml-silero-v5.1.2.bin";
+/// The model "Automatic" picks when a GPU is usable.
+pub const BEST_MODEL: &str = "ggml-large-v3-turbo-q5_0.bin";
 
 /// A model Murmr knows how to download.
 pub struct CatalogModel {
@@ -31,7 +33,7 @@ pub struct CatalogModel {
 }
 
 pub const CATALOG: &[CatalogModel] = &[CatalogModel {
-    file: "ggml-large-v3-turbo-q5_0.bin",
+    file: BEST_MODEL,
     label: "Large v3 Turbo",
     description: "Much more accurate than Base, especially on names, jargon and accents. Fast on a GPU; slow on CPU.",
     url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",

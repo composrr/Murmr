@@ -277,6 +277,8 @@ export interface Settings {
   // ---- Model / accuracy ----
   /** Filename of the Whisper model inside the models dir. */
   model_name: string;
+  /** Pick the best model automatically (Turbo with a GPU, else Base). Default true. */
+  auto_model: boolean;
   /** Beam-search decoding: more accurate, a bit slower. Default false. */
   accuracy_mode: boolean;
 
@@ -303,7 +305,7 @@ export interface Settings {
   command_hotkey: string;
 
   // ---- Live preview ----
-  /** Rough text in the HUD while recording. null = automatic (on with a GPU, off on CPU). */
+  /** Rough text in the HUD while recording. null = off (default). */
   live_preview: boolean | null;
   // ---- end live preview ----
 }

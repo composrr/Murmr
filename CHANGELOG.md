@@ -14,6 +14,17 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+### Works well out of the box
+
+- **Best model, automatically.** Settings → Advanced → Model now defaults to
+  **Automatic**. With a usable GPU, Murmr downloads Large v3 Turbo in the
+  background on first run and switches to it when it's ready (dictation keeps
+  working on Base meanwhile). Without a GPU it stays on the fast Base model.
+  Pick a model by hand to opt out.
+- **One-step AI cleanup setup.** Paste your Anthropic key and press Save:
+  Murmr checks the key and turns AI cleanup on.
+- **Live preview is now off by default.** Turn it on in Settings → Advanced.
+
 <!-- engine (session A): GPU + large-v3-turbo + context carry-over + Silero VAD -->
 ### New
 

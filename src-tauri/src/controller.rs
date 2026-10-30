@@ -1665,7 +1665,7 @@ impl Controller {
         let s = self.settings.get();
         let t = self.engine.current();
         let on_gpu = t.backend().is_gpu();
-        if !s.live_preview.unwrap_or(on_gpu) {
+        if !s.live_preview.unwrap_or(false) {
             return false;
         }
         // On CPU only light models are previewed: a turbo partial takes 4-8 s

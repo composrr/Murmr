@@ -35,14 +35,25 @@ export default function AiCleanupSection({
       .catch((e) => setError(String(e)));
   }, []);
 
+  // Save = test, then store. A key that works turns AI cleanup on, so
+  // pasting a key and pressing Save is the whole setup.
   const save = async () => {
     setBusy(true);
     setError(null);
+    setTest({ kind: 'running' });
     try {
+      const r = await llmTestKey(draft.trim());
+      if (!r.ok) {
+        setTest({ kind: 'error', message: r.message });
+        return;
+      }
+      setTest({ kind: 'ok', ms: r.latency_ms, sample: r.message });
       setStatus(await llmSaveKey(draft));
       setDraft('');
+      if (!settings.ai_cleanup) update({ ai_cleanup: true });
     } catch (e) {
       setError(String(e));
+      setTest({ kind: 'idle' });
     } finally {
       setBusy(false);
     }
@@ -98,7 +109,7 @@ export default function AiCleanupSection({
         hint={
           hasKey
             ? `Saved in your system keychain (${status?.hint ?? '••••'}).`
-            : 'Stored in your system keychain, never in settings.json.'
+            : 'Paste your key and press Save. Murmr checks it and turns AI cleanup on. Stored in your system keychain, never in settings.json.'
         }
       >
         <div className="flex items-center gap-2">
@@ -115,7 +126,7 @@ export default function AiCleanupSection({
           )}
           {!hasKey && (
             <SecondaryButton onClick={save} disabled={busy || draft.trim().length === 0}>
-              Save
+              {test.kind === 'running' && busy ? 'Checking…' : 'Save'}
             </SecondaryButton>
           )}
           <SecondaryButton onClick={runTest} disabled={!canTest || test.kind === 'running'}>

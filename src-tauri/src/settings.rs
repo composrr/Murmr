@@ -148,6 +148,13 @@ pub struct Settings {
     /// Lets users drop in a larger model and select it without a rebuild.
     #[serde(default = "default_model_name")]
     pub model_name: String,
+    /// Pick the best model for this computer automatically: Large v3 Turbo
+    /// when a GPU is usable (downloaded in the background on first run),
+    /// otherwise the bundled Base model. `model_name` is ignored while on.
+    /// Turning it off (choosing a model by hand) uses `model_name`. On by
+    /// default, including for existing installs.
+    #[serde(default = "default_true")]
+    pub auto_model: bool,
     /// Trade speed for accuracy: use beam-search decoding instead of the
     /// fast greedy path. Noticeably better on jargon/accents, a bit slower.
     /// Off by default.
@@ -197,8 +204,8 @@ pub struct Settings {
     pub command_hotkey: String,
 
     // ---- Live preview ----
-    /// Show rough text in the HUD while recording. `None` = automatic: on
-    /// when a GPU backend is in use, off on CPU. `Some(_)` = the user chose.
+    /// Show rough text in the HUD while recording. `None` = off (the
+    /// default). `Some(_)` = the user chose.
     #[serde(default)]
     pub live_preview: Option<bool>,
     // ---- end live preview ----
@@ -277,6 +284,7 @@ impl Default for Settings {
             fuzzy_dictionary: true,
 
             model_name: default_model_name(),
+            auto_model: true,
             accuracy_mode: false,
 
             streamer_mode: false,

@@ -1100,7 +1100,9 @@ fn cancel_model_download() {
 /// Delete a downloaded model. Refuses the model that is selected or loaded.
 #[tauri::command]
 fn delete_model(file: String, state: State<'_, AppState>) -> Result<(), String> {
-    if state.settings.get().model_name == file || state.engine.status().model_name == file {
+    let s = state.settings.get();
+    let selected = !s.auto_model && s.model_name == file;
+    if selected || state.engine.status().model_name == file {
         return Err("Switch to another model before deleting this one.".into());
     }
     models::delete_downloaded(&file)
