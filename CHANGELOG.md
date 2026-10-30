@@ -14,97 +14,53 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
-### Works well out of the box
+---
 
-- **Best model, automatically.** Settings → Advanced → Model now defaults to
-  **Automatic**. With a usable GPU, Murmr downloads Large v3 Turbo in the
-  background on first run and switches to it when it's ready (dictation keeps
-  working on Base meanwhile). Without a GPU it stays on the fast Base model.
-  Pick a model by hand to opt out.
-- **One-step AI cleanup setup.** Paste your Anthropic key and press Save:
-  Murmr checks the key and turns AI cleanup on.
-- **Live preview is now off by default.** Turn it on in Settings → Advanced.
+## v0.1.73 — Smarter, more accurate, and it sets itself up
 
-<!-- engine (session A): GPU + large-v3-turbo + context carry-over + Silero VAD -->
 ### New
 
-- **GPU transcription.** Murmr now uses your graphics card — Vulkan on Windows
-  (NVIDIA, AMD, Intel) and Metal on Apple Silicon Macs. Settings → Advanced
-  shows which one is in use. No GPU, or a GPU that misbehaves? Murmr checks
-  once per version and quietly stays on the CPU. A **Use GPU** switch lets you
-  force CPU-only.
-- **Large v3 Turbo model, one click away.** Download it from Settings →
-  Advanced (574 MB, checksum-verified) for much better accuracy on names,
-  jargon and accents. It switches over instantly — no restart. Recommended
-  when you have a GPU; it is slow on CPU.
-- **Skip silence.** Pauses are trimmed out before transcription (Silero VAD),
-  which cuts the phantom "Thank you." and repeat loops on long takes. On by
-  default; switch it off in Advanced.
+- **Uses your graphics card.** Murmr now transcribes on your GPU — Vulkan on
+  Windows (NVIDIA, AMD, Intel) and Metal on Apple Silicon Macs. No GPU, or one
+  that misbehaves? Murmr checks once per version and quietly stays on the CPU.
+  Settings → Advanced shows which is in use.
+- **The most accurate model, automatically.** With a GPU, Murmr downloads the
+  Large v3 Turbo model (574 MB) in the background the first time it opens and
+  switches to it when it's ready — much better on names, jargon and accents.
+  You can dictate the whole time. Without a GPU it stays on the fast Base
+  model. Pick a model by hand in Settings → Advanced to opt out.
+- **AI cleanup (optional).** Add your own Anthropic API key in Preferences and
+  Murmr polishes each dictation with Claude Haiku: punctuation, grammar,
+  filler words, false starts, and lists when you clearly dictated one. It
+  keeps your words and never answers what you said. Paste the key and press
+  Save — Murmr checks it and turns AI cleanup on. If it's slow or offline,
+  Murmr types the normal text instead. The key lives in your system keychain;
+  only the text (never audio) is sent to Anthropic.
+- **Command mode (optional).** Set a Command shortcut in Hotkeys, select text
+  in any app, press it and say what to do — "make this shorter", "turn this
+  into bullets", "translate to Spanish". With nothing selected, say what to
+  write and it's typed at your cursor. Uses the same API key.
+- **Murmr learns from your corrections.** Fix a misheard name in the edit-last
+  bubble, or in a past transcript on Home (pencil icon), and Murmr suggests
+  adding it to your Dictionary. Review them under Dictionary → Suggested.
+  Nothing is added without your OK.
+- **Live preview (optional).** Turn it on in Settings → Advanced to see your
+  words in the HUD while you talk. Off by default.
 
 ### Improved
 
-- **Long dictations stay consistent.** Each ~30 s piece of a long recording
-  now hears the end of the previous piece (plus your dictionary words), so
-  casing, punctuation and a sentence split across the cut come out right.
-<!-- end engine -->
-<!-- AI cleanup (ai-cleanup branch) -->
-### New
-
-- **AI cleanup (optional, off by default).** Turn it on in Preferences and add
-  your own Anthropic API key, and Murmr polishes each dictation with Claude
-  Haiku after its built-in rules: punctuation, grammar, filler words, false
-  starts, and lists or paragraphs when you clearly dictated one. It never
-  answers or acts on what you said, and it keeps your words. If the call is
-  slow (over ~2.5 s), fails, or no key is saved, Murmr types the rule-based
-  text as before. The key lives in your system keychain. When it's on, the
-  text of each dictation is sent to Anthropic; audio never leaves your
-  computer. Skipped in literal mode and for very short dictations.
-<!-- /AI cleanup -->
-
-<!-- Command mode (command-mode branch) -->
-- **Command mode (optional, off by default).** Bind a Command shortcut in
-  Hotkeys, select some text in any app, press it and say what to do: "make
-  this shorter", "turn this into bullets", "fix the grammar", "translate to
-  Spanish". Murmr replaces the selection with Claude's rewrite. With nothing
-  selected, say what to write ("write a polite reply saying I can't make it")
-  and it's typed at your cursor. Tap to start and stop, or hold while you
-  speak. Uses the same Anthropic API key as AI cleanup; the selected text and
-  your instruction are sent to Anthropic. If anything goes wrong (no key,
-  didn't hear you, slow, offline, you switched apps) the HUD says so and your
-  text and clipboard are left as they were.
-<!-- /Command mode -->
-<!-- dict-learning: begin -->
-### New
-
-- **Murmr learns from your corrections.** When you fix a misheard name, brand
-  or term in the edit-last bubble, Murmr suggests adding it to your
-  Dictionary. Tap the "Add to dictionary" chip before Insert, or review
-  everything later under **Dictionary → Suggested** (Add or Dismiss).
-  Suggestions are never added on their own, and grammar or punctuation fixes
-  are ignored.
-- **Fix a past transcript from History.** Hover a transcript on Home and click
-  the pencil to correct it. The fix is saved and feeds the same suggestions.
+- **Skips silence.** Pauses are trimmed before transcribing, which cuts the
+  phantom "Thank you." and repeat loops on long takes.
+- **Long dictations stay consistent.** Each piece of a long recording hears
+  the end of the previous one, so casing and punctuation across the cut come
+  out right.
 
 ### Fixed
 
-- **The edit-last bubble now fits on screen.** Its text box and Insert / Copy /
-  Cancel buttons were clipped by the small HUD window.
-- **Edited text goes back to the right window more reliably.** Murmr now hands
-  focus back to the window you were in before hiding the bubble, and checks it
-  worked. If that window was closed, the corrected text is put on your
-  clipboard instead of being lost. Cancel also returns focus to that window.
-<!-- dict-learning: end -->
-
-<!-- live preview: begin -->
-### New
-
-- **Live preview.** While you dictate, the HUD shows your words as you say
-  them — settled words in full white, the still-changing end dimmed. It's a
-  preview only: what gets pasted is still the full-accuracy pass that runs when
-  you stop, and the preview never slows it down. On automatically when Murmr
-  uses your GPU; off on CPU (you can switch it on in Settings → Advanced for
-  the Base model).
-<!-- live preview: end -->
+- **The edit-last bubble fits on screen** — its text box and buttons were
+  being cut off.
+- **Edited text goes back to the right window more reliably.** If that window
+  was closed, the corrected text goes to your clipboard instead of being lost.
 
 ---
 
