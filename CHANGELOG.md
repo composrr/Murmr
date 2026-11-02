@@ -16,7 +16,7 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
-## v0.1.73 — Smarter, more accurate, and it sets itself up
+## v0.1.74 — Smarter, more accurate, and it sets itself up
 
 ### New
 
