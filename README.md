@@ -2,49 +2,64 @@
 
 > *Speak. It types.*
 
-Murmr is a privacy-first, cross-platform desktop voice-dictation app — a local
-alternative to Wispr Flow / WhisperTyping. Press a key, speak, and your words
-are transcribed locally and typed into whatever app you're focused on.
-**No internet required, no API keys, no subscription.**
+Murmr is a privacy-first desktop voice-dictation app for Windows and macOS — a
+local alternative to Wispr Flow / WhisperTyping. Press a key, speak, and your
+words are transcribed on your own computer and typed into whatever app you're
+in. **No account, no subscription, and your audio never leaves your machine.**
 
-- 🔒 **Local-only** — Whisper runs on your CPU. No audio or text leaves your machine.
-- 🎙️ **Tap to toggle, hold for push-to-talk** — both work from one bare-modifier key (`Right Ctrl` by default).
-- 🌍 **Works in every app** — Notepad, Word, Chrome, VS Code, Slack, terminal, anywhere you can type.
-- ✨ **Cleans up as you go** — removes filler words, fixes punctuation, capitalizes sentences.
-- 🗣️ **Voice commands** — say "period", "comma", "new line" and Murmr inserts the right character.
-- 📚 **Custom dictionary** — teach it proper nouns, replacements, and snippet expansions.
-- 🔁 **Searchable history** — every transcription is saved locally; copy, re-paste, or delete any.
+- 🔒 **Local speech recognition** — Whisper runs on your computer, on the GPU
+  when you have one (Metal on Apple Silicon, Vulkan on Windows). Audio is
+  never uploaded.
+- 🎙️ **Tap to toggle, hold for push-to-talk** — both from one key.
+- 🌍 **Works in every app** — Word, Chrome, VS Code, Slack, Terminal, anywhere
+  you can type.
+- ✨ **Cleans up as you go** — removes filler words, fixes punctuation,
+  capitalizes sentences, and skips silence.
+- 🗣️ **Voice commands** — say "period", "comma", "new line" and Murmr inserts
+  the right character.
+- 📚 **Dictionary that learns** — teach it names, replacements and snippets.
+  When you correct a misheard word, Murmr offers to add it.
+- 🔁 **Searchable history** — every transcription is saved locally; copy,
+  re-paste, edit or delete any of them.
+- 🤖 **Optional AI features** — with your own Anthropic API key, Murmr can
+  polish each dictation (AI cleanup) or rewrite selected text on command
+  (Command mode). Off unless you add a key; only text is sent, never audio.
 
 ---
 
-## Install (end users)
+## Install
 
-> **Status:** Murmr is in active development. Pre-built installers will land on
-> the GitHub Releases page once `v0.1.0` is tagged. Until then, build from
-> source — see [Build from source](#build-from-source) below.
-
-### Windows
-
-1. Download the latest `.msi` from
-   [Releases](https://github.com/<your-username>/murmr/releases).
-2. Double-click. **Windows SmartScreen will warn you** that the publisher is
-   unverified — Murmr is unsigned for now. Click **More info → Run anyway**.
-3. The installer drops Murmr into `%LOCALAPPDATA%\Murmr\` and starts it on next
-   login if you opt in during onboarding.
-4. Murmr lives in the system tray. Right-click for `Open · Pause · Quit`.
+Download the latest installer from
+[Releases](https://github.com/composrr/Murmr/releases/latest).
 
 ### macOS
 
-1. Download the latest `.dmg` from Releases.
-2. Drag Murmr into `Applications` and double-click to launch. The macOS app is
-   code-signed and notarized by Apple, so it opens without any Gatekeeper
-   warning or Terminal workaround.
-3. macOS will ask for **Microphone** permission and **Accessibility** permission
-   on first dictation. Grant both — Accessibility is required for Murmr to type
-   into other apps on your behalf.
+1. Download `Murmr_<version>_aarch64.dmg` (Apple Silicon) or
+   `Murmr_<version>_x64.dmg` (Intel).
+2. Open it and drag Murmr into **Applications**. The app is signed and
+   notarized by Apple, so it opens with no Gatekeeper warning.
+3. Grant the three permissions Murmr asks for: **Microphone**, **Input
+   Monitoring** (to hear the hotkey) and **Accessibility** (to type into other
+   apps). Settings → Permissions shows which are on and opens the right System
+   Settings page for anything missing.
+4. **Pick a hotkey your keyboard has.** Mac keyboards usually have no Right
+   Ctrl, so set the dictation key to **Right Option** (shown as `AltGr`) in
+   Settings → Hotkeys.
 
-> **Note:** the macOS build is signed with an Apple Developer ID; the Windows
-> build is still unsigned (SmartScreen "More info → Run anyway" on first launch).
+### Windows
+
+1. Download `Murmr_<version>_x64-setup.exe` and run it.
+2. **Windows SmartScreen will warn you** that the publisher is unverified —
+   the Windows build is not code-signed yet. Click **More info → Run anyway**.
+3. Murmr lives in the system tray. Right-click it for **Open Murmr · Pause
+   dictation · Quit Murmr**.
+
+### Updates
+
+Murmr checks for new versions itself and shows a banner when one is ready.
+You can also check by hand in **Settings → General → Check for updates**.
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md) and in the
+app's "What's new" view.
 
 ---
 
@@ -54,33 +69,60 @@ are transcribed locally and typed into whatever app you're focused on.
 
 | Shortcut | Action |
 |---|---|
-| **Right Ctrl** (tap, < 250 ms) | Toggle recording — tap again to stop |
-| **Right Ctrl** (hold, > 250 ms) | Push-to-talk — release stops recording |
-| **Shift + Right Ctrl** | Re-paste the most recent transcription |
-| **Esc** while recording | Cancel — discard audio, no insert |
+| **Dictation key** (tap, under 250 ms) | Start recording; tap again to stop |
+| **Dictation key** (hold) | Push-to-talk; letting go stops recording |
+| **Esc** while recording | Cancel; nothing is typed |
+| **Re-paste** (off by default) | Type the most recent transcription again |
+| **Edit last** (off by default) | Open the last transcription in an editable bubble |
+| **Command** (off by default) | Speak an instruction for the selected text |
+
+The dictation key is **Right Ctrl** by default. Any key or combination works,
+including a modifier on its own (Right Ctrl, Right Option, Right Cmd). Change
+it, and turn on the optional shortcuts, in **Settings → Hotkeys**. When the
+dictation key is a modifier, normal shortcuts like Ctrl+C or Option+E still
+work: Murmr only reacts when you press the key by itself.
 
 ### The HUD
 
-While you're dictating, a dark pill floats just under the focused text field
-showing a red recording dot, a live waveform, an elapsed timer, and a running
-estimate of words spoken. Then it morphs into a quiet "transcribing" indicator
-while Whisper runs (typically 1–3 s on `base.en`). Once your text is pasted,
-the pill vanishes.
+While you dictate, a small dark pill floats near the text field you're typing
+in. It shows a recording dot, a live waveform and a timer, then a short
+"transcribing" state. Once your text is typed, the pill disappears. Turn on
+**Live preview** (Settings → Advanced) to see your words in the pill as you
+speak.
 
-### Settings
+### Speech models
 
-Open the main window (left-click the tray icon, or `Open Murmr` from the menu).
-The sidebar has:
+Murmr ships with the fast **Base (English)** model. On a computer with a
+supported GPU it downloads **Large v3 Turbo** (574 MB) in the background the
+first time it opens and switches to it when ready — much better with names,
+jargon and accents. Choose a model yourself in **Settings → Advanced**.
 
-- **Home** — chronological transcription history with full-text search and
-  copy / re-insert / delete actions per row.
-- **Insights** — words-per-minute, total words, time saved, GitHub-style
-  streak heatmap, most-used words, filler-words ranking, and milestone-gated
-  speaking-habits cards.
-- **Dictionary** — unified words / replacements / snippets list with
-  inline add/edit/delete.
-- **General · Microphone · Hotkeys · Preferences · Advanced** — all the
-  configuration you'd expect.
+### AI cleanup and Command mode (optional)
+
+Paste your own Anthropic API key in **Settings → Preferences** and press Save.
+Murmr checks the key and turns on **AI cleanup**: Claude Haiku fixes
+punctuation, grammar, false starts and lists, without changing your words. If
+the service is slow or offline, Murmr types the normal text instead.
+
+With a key set you can also bind a **Command** shortcut. Select text anywhere,
+press it and say what to do ("make this shorter", "turn this into bullets",
+"translate to Spanish"). With nothing selected, say what to write and it's
+typed at your cursor.
+
+The key is stored in your system keychain. Only text is sent to Anthropic.
+
+### The main window
+
+Open it from the tray icon (left-click, or **Open Murmr**).
+
+- **Home** — your transcription history with search, copy, re-insert, edit
+  and delete.
+- **Insights** — words per minute, total words, time saved, a streak
+  heatmap, most-used words and filler words.
+- **Dictionary** — words, replacements and snippets, plus **Suggested**
+  entries learned from your corrections.
+- **Settings** — General, Microphone, Hotkeys, Preferences, Advanced, and
+  Permissions (macOS).
 
 ---
 
@@ -93,7 +135,7 @@ The sidebar has:
 | **Rust** (stable) | Backend | `rustc 1.75+` |
 | **Node.js** | Frontend | `v20+` |
 | **CMake** | whisper.cpp build | `3.20+` |
-| **LLVM (clang)** | bindgen needs `libclang.dll` | `15+` |
+| **LLVM (clang)** | bindgen needs `libclang` | `15+` |
 | **Vulkan SDK** (Windows) | GPU (Vulkan) build of whisper.cpp | `1.4.341+` |
 | **Visual Studio Build Tools** (Windows) | MSVC + Windows SDK | `2022` (or 2019) |
 | **Xcode Command Line Tools** (macOS) | Apple toolchain | latest |
@@ -117,11 +159,10 @@ winget install --id LLVM.LLVM --silent
 #     --accept-licenses --default-answer --confirm-command install copy_only=1
 ```
 
-The repo includes [`scripts/run-tauri.mjs`](scripts/run-tauri.mjs) which
-auto-discovers the VS-bundled CMake + MSVC, the standard LLVM install path and
-the Vulkan SDK (`C:\VulkanSDK\*` or `~\VulkanSDK\*`) and prepends them to
-`PATH` / sets `LIBCLANG_PATH` / `VULKAN_SDK` so `npm run tauri dev` works
-without Developer Command Prompts.
+[`scripts/run-tauri.mjs`](scripts/run-tauri.mjs) finds the VS-bundled CMake +
+MSVC, the standard LLVM install path and the Vulkan SDK (`C:\VulkanSDK\*` or
+`~\VulkanSDK\*`), and sets `PATH` / `LIBCLANG_PATH` / `VULKAN_SDK` so
+`npm run tauri dev` works without a Developer Command Prompt.
 
 #### One-time install on macOS
 
@@ -130,26 +171,22 @@ xcode-select --install
 brew install cmake llvm
 ```
 
-### Get the Whisper model
+### Get the bundled models
 
-Murmr ships with `ggml-base.en.bin` bundled into the installer, but for local
-development you need to download it once into `src-tauri/models/`:
+The installer bundles two model files. The build fails without them, so
+download them once into `src-tauri/models/` (they are gitignored):
 
 ```bash
+mkdir -p src-tauri/models
 curl -L -o src-tauri/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+curl -fL -o src-tauri/models/ggml-silero-v5.1.2.bin \
+  https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin
 ```
 
-The file is ~150 MB and is gitignored. Also grab the Silero VAD model (885 KB,
-used to skip silence; Murmr works without it, just with VAD off):
-
-```bash
-curl -L -o src-tauri/models/ggml-silero-v5.1.2.bin \
-  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
-```
-
-Larger models (Large v3 Turbo) are downloaded in-app from Settings → Advanced
-into `<app data>/models/`.
+`ggml-base.en.bin` (~150 MB) is the default speech model;
+`ggml-silero-v5.1.2.bin` (885 KB) detects silence. Larger models are
+downloaded in-app into `<app data>/models/`.
 
 ### Run the dev build
 
@@ -158,8 +195,51 @@ npm install
 npm run tauri dev
 ```
 
-First run takes ~5 minutes — Cargo compiles whisper.cpp + a few hundred Rust
-crates. Subsequent runs are seconds.
+The first run takes ~5 minutes while Cargo compiles whisper.cpp and a few
+hundred crates. Later runs take seconds.
+
+### Build an app locally
+
+```bash
+# macOS, signed with your Developer ID; skips updater artifacts (no updater key needed)
+APPLE_SIGNING_IDENTITY="Developer ID Application: <name> (<team>)" \
+  npm run tauri -- build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+The app lands in `src-tauri/target/release/bundle/macos/Murmr.app`.
+
+### Hotkey self-test (macOS)
+
+To check tap and hold handling without touching the keyboard, build with the
+`hotkey-selftest` feature and launch with `MURMR_HOTKEY_SELFTEST=1`:
+
+```bash
+npm run tauri -- build --bundles app --features hotkey-selftest \
+  --config '{"bundle":{"createUpdaterArtifacts":false}}'
+open -n --env MURMR_HOTKEY_SELFTEST=1 src-tauri/target/release/bundle/macos/Murmr.app
+```
+
+It presses Right Option through macOS at several tap and hold lengths
+(practice mode, so nothing is typed or saved), logs each result to
+`~/Library/Application Support/app.murmr.desktop/perf.log` (`[hk-selftest]`
+and `[ctrl] DictationUp … → Toggled / push-to-talk complete`), then quits.
+Quit your installed Murmr first so two copies don't both react. The feature is
+never enabled in release builds.
+
+### Releasing
+
+Bump the version in `package.json`, `src-tauri/tauri.conf.json` and
+`src-tauri/Cargo.toml`, add a `CHANGELOG.md` entry, then push a tag:
+
+```bash
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+[`release.yml`](.github/workflows/release.yml) builds Windows, macOS Apple
+Silicon and macOS Intel, signs and notarizes the Mac builds, and publishes a
+GitHub Release with `latest.json` for the in-app updater. See
+[DEPLOY.md](DEPLOY.md) for secrets and details.
 
 ### Project structure
 
@@ -167,88 +247,93 @@ crates. Subsequent runs are seconds.
 murmr/
 ├── src/                       # React frontend (TypeScript)
 │   ├── windows/
-│   │   ├── main/              # Sidebar + page router (Home, Insights, …)
+│   │   ├── main/              # Sidebar + pages (Home, Insights, Dictionary, Settings)
 │   │   ├── hud/               # Floating dictation pill
 │   │   └── onboarding/        # First-run wizard
 │   ├── components/            # Shared primitives
-│   ├── hooks/                 # useTheme, useDictationStatus
+│   ├── hooks/                 # Theme, dictation status, updater
 │   └── lib/                   # ipc.ts, theme.ts, format.ts
 ├── src-tauri/                 # Rust backend
 │   ├── src/
-│   │   ├── audio/             # cpal capture + rubato resample
-│   │   ├── transcribe/        # whisper-rs + post-processing pipeline
-│   │   ├── hotkey/            # rdev global keyboard hook
-│   │   ├── injector/          # arboard + enigo clipboard-paste
-│   │   ├── focus/             # Win32 UIA + caret lookup for HUD positioning
+│   │   ├── audio/             # cpal capture + resample
+│   │   ├── audio_duck/        # Lowers other audio while you dictate
+│   │   ├── transcribe/        # whisper-rs, GPU detection, models, post-processing
+│   │   ├── llm/               # AI cleanup + Command mode (Anthropic)
+│   │   ├── hotkey/            # Global keyboard hook (tap vs hold, chords)
+│   │   ├── injector/          # Clipboard paste / keystroke typing
+│   │   ├── focus/             # Focused window + caret lookup (Windows, macOS)
+│   │   ├── permissions/       # macOS permission checks
 │   │   ├── db/                # SQLite via rusqlite
-│   │   ├── settings.rs        # JSON settings store
-│   │   ├── sounds.rs          # Synthesized + custom-WAV playback
-│   │   ├── controller.rs      # State machine: hotkey → record → transcribe → inject
-│   │   └── lib.rs             # Tauri entry, tray, IPC handler registry
-│   └── models/ggml-base.en.bin
-├── public/fonts/              # Inter + Source Serif 4 (bundled, no Google Fonts)
-└── scripts/run-tauri.mjs      # Auto-discovers CMake / MSVC / LLVM on Windows
+│   │   ├── learning.rs        # Dictionary suggestions from your corrections
+│   │   ├── live_preview.rs    # Words in the HUD while you speak
+│   │   ├── controller.rs      # State machine: hotkey → record → transcribe → type
+│   │   └── lib.rs             # Tauri entry, tray, IPC handlers
+│   └── models/                # Bundled models (download, gitignored)
+├── vendor-rdev/               # Patched rdev (macOS 26 fixes, reliable modifier keys)
+├── public/fonts/              # Bundled fonts (no Google Fonts)
+└── scripts/run-tauri.mjs      # Finds CMake / MSVC / LLVM / Vulkan on Windows
 ```
 
 ---
 
 ## Troubleshooting
 
-### Microphone error: "Microphone error: Stream error"
+### The hotkey doesn't trigger anything
 
-Your mic was disconnected mid-dictation, or another app exclusively claimed
-the device. Check Settings → Privacy → Microphone, and try a different input
+- Make sure Murmr is running (tray / menu bar icon visible) and not paused.
+- Check the key in **Settings → Hotkeys**. Left and right modifiers are
+  different keys: Right Ctrl won't respond to Left Ctrl.
+- **macOS:** most Mac keyboards have no Right Ctrl — use Right Option. Check
+  **Settings → Permissions**: Input Monitoring and Accessibility must both be
+  on.
+- **Windows:** a remap in PowerToys / AutoHotkey takes precedence over Murmr.
+
+### "Microphone error: Stream error"
+
+Your mic was disconnected mid-dictation, or another app took exclusive control
+of it. Check your system's microphone privacy settings and try another input
 in **Settings → Microphone**.
 
-### Right Ctrl doesn't trigger anything
+### "Location is not available" when opening the app data folder (Windows)
 
-- Make sure Murmr is running — tray icon visible.
-- Murmr listens for *Right Ctrl* specifically, not Left Ctrl. They report as
-  different keys.
-- If you've remapped Right Ctrl via PowerToys / AutoHotkey, that takes
-  precedence over our hook.
-
-### "Location is not available" when opening the app data folder
-
-Old Tauri-Windows quirk: the app's identifier ends in `.desktop` and the shell
-tries to interpret that as a file extension. Murmr's "Open" buttons explicitly
-use `explorer /e,<path>` which avoids the issue. If you hit this after
-upgrading from an older build, restart the app.
+The app's identifier ends in `.desktop`, which Explorer can mistake for a file
+extension. Murmr's "Open" buttons work around this; if you see it after
+upgrading from an old build, restart the app.
 
 ### Transcription is slow
 
-`base.en` is the default model and balances accuracy/speed on a modern CPU
-(~2× real-time). For an even quicker model, swap to `tiny.en` (~75 MB) — Settings
-→ Advanced → Speech model file.
+Check **Settings → Advanced** to see whether Murmr is using your GPU. On a
+computer without one, Murmr stays on the fast Base model; avoid switching to
+Large v3 Turbo there.
 
-### Whisper produces "Thanks for watching!" or other random phrases
+### Random phrases like "Thanks for watching!"
 
-Whisper hallucinates common training-data phrases on near-silence. Murmr's
-energy-based VAD already drops most of these before transcription, and any
-that slip through are filtered against a known hallucination list. If you
-still see them, try increasing your mic gain.
+Whisper sometimes invents common phrases from near-silence. Murmr skips
+silence and filters known phrases. If you still see them, move closer to the
+mic or raise its input level in your system settings.
+
+### Logs
+
+Murmr writes a diagnostic log to `perf.log` in its app data folder:
+
+- macOS: `~/Library/Application Support/app.murmr.desktop/perf.log`
+- Windows: `%APPDATA%\app.murmr.desktop\perf.log`
 
 ---
 
 ## Roadmap
 
-- [x] Local Whisper transcription
-- [x] Global hotkey + clipboard-paste injection
-- [x] Floating HUD with live waveform
-- [x] SQLite-backed transcription history + search
-- [x] Insights page (stats + heatmap + top words + speaking habits)
-- [x] Dictionary (words / replacements / snippets) with CRUD
-- [x] First-run onboarding wizard
-- [x] Post-processing pipeline (fillers, voice commands, auto-cap)
-- [x] Sound effects + custom WAV support
-- [x] Settings persistence + launch-at-login + retention auto-purge
-- [ ] **Auto-update** — in-app background check + one-click update via Tauri Updater
-- [ ] Code-signed installers (Windows + macOS)
-- [ ] AI rewrite stage (local LLM for self-correction patterns + tone polish)
-- [ ] Streaming partial transcription rendered live in the HUD
+- [x] Local Whisper transcription, on the GPU when available
+- [x] Global hotkey (tap / hold) + paste into any app
+- [x] Floating HUD with live waveform and optional live preview
+- [x] Searchable history, Insights, Dictionary with learned suggestions
+- [x] First-run onboarding and macOS permissions panel
+- [x] Auto-update
+- [x] Signed and notarized macOS builds
+- [x] AI cleanup and Command mode (bring your own Anthropic key)
+- [ ] Code-signed Windows installer
 - [ ] Per-app injection profiles
 - [ ] Multilingual model support
-- [ ] Mobile companion app
 
 ---
 
