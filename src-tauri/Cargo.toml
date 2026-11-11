@@ -1,6 +1,6 @@
 [package]
 name = "murmr"
-version = "0.1.74"
+version = "0.1.75"
 description = "Murmr — privacy-first local voice dictation"
 authors = ["Murmr"]
 edition = "2021"
@@ -21,6 +21,11 @@ panic = "abort"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[features]
+# Local testing only, never in releases: with MURMR_HOTKEY_SELFTEST=1 the
+# macOS app presses the dictation key through the OS and logs the result.
+hotkey-selftest = []
 
 [dependencies]
 # `devtools` enables Ctrl+Shift+I in release builds. Useful while we're

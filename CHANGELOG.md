@@ -16,6 +16,26 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.75 — The Mac hotkey works first try
+
+### Fixed
+
+- **Quick taps work on Mac.** Tapping the dictation key now starts recording
+  every time, first try. Before, most taps on a Mac ended the recording the
+  instant it began: Murmr timed the tap *after* it finished starting the
+  microphone (about a quarter of a second on a Mac), so every quick tap looked
+  like a short hold. Murmr now times the key from the moment you actually let
+  go.
+- **No more stuck recordings from a tap at just the wrong moment.** A release
+  landing at the exact instant Murmr decided "this is a hold" could arrive
+  before the press, leaving the recording open until the next press.
+- **Mac modifier keys read reliably.** Murmr now checks the exact key's own
+  signal (for example, Right Option) instead of guessing from all modifier
+  keys together, so a missed Shift or Command event can no longer make it
+  read your dictation key backwards.
+
+---
+
 ## v0.1.74 — Smarter, more accurate, and it sets itself up
 
 ### New

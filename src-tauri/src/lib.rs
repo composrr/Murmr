@@ -1357,6 +1357,13 @@ pub fn run() {
                 );
             } else {
                 hotkey::spawn(hotkey_tx, initial_hotkeys);
+                #[cfg(all(target_os = "macos", feature = "hotkey-selftest"))]
+                if std::env::var("MURMR_HOTKEY_SELFTEST").is_ok() {
+                    hotkey::selftest_macos::spawn(
+                        app.handle().clone(),
+                        Arc::clone(&practice_mode),
+                    );
+                }
             }
             let sounds = SoundPlayer::new(Arc::clone(&settings), app.handle());
 

@@ -510,7 +510,7 @@ pub mod selftest {
             let _ = tx.send(HotkeyEvent::DictationDown { pressed_at: Instant::now() });
             std::thread::sleep(Duration::from_secs_f64(secs + 0.7));
             perf_log::append("[selftest] DictationUp");
-            let _ = tx.send(HotkeyEvent::DictationUp);
+            let _ = tx.send(HotkeyEvent::DictationUp { released_at: Instant::now() });
             std::thread::sleep(Duration::from_secs(20));
             perf_log::append("[selftest] done, exiting");
             app.exit(0);

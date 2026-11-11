@@ -266,7 +266,14 @@ impl Controller {
                     perf_log::append(&format!(
                         "[ctrl] DictationDown received → start_recording (session={session})"
                     ));
-                    if let Err(e) = self.start_recording() {
+                    let start_t = Instant::now();
+                    let started = self.start_recording();
+                    perf_log::append(&format!(
+                        "[ctrl] start_recording took {}ms (press→now {}ms)",
+                        start_t.elapsed().as_millis(),
+                        pressed_at.elapsed().as_millis()
+                    ));
+                    if let Err(e) = started {
                         perf_log::append(&format!("[ctrl] start_recording failed: {e}"));
                         self.sounds.play_error_beep();
                         self.emit(Status::Error {
@@ -338,8 +345,16 @@ impl Controller {
                     self.complete_recording();
                 }
 
-                (HotkeyEvent::DictationUp, RecState::HoldUncertain) => {
-                    let elapsed = press_at.map(|t| t.elapsed()).unwrap_or_default();
+                (HotkeyEvent::DictationUp { released_at }, RecState::HoldUncertain) => {
+                    // How long the key was physically held: release time
+                    // (stamped by the hook) minus press time. Using
+                    // `press_at.elapsed()` here counted the time this thread
+                    // spent in start_recording (~250ms on macOS) as hold
+                    // time, so quick taps were misread as push-to-talk and
+                    // the recording ended instantly.
+                    let elapsed = press_at
+                        .map(|t| released_at.saturating_duration_since(t))
+                        .unwrap_or_default();
                     let tap_threshold_ms =
                         self.settings.get().tap_threshold_ms.max(MIN_TAP_THRESHOLD_MS);
                     let tap_threshold = Duration::from_millis(tap_threshold_ms as u64);
@@ -361,7 +376,7 @@ impl Controller {
                         // recording_active stays true — Toggled means recording continues
                     }
                 }
-                (HotkeyEvent::DictationUp, _) => {}
+                (HotkeyEvent::DictationUp { .. }, _) => {}
 
                 (HotkeyEvent::EscDown, RecState::HoldUncertain | RecState::Toggled) => {
                     perf_log::append("[ctrl] EscDown → cancel recording");
@@ -436,10 +451,12 @@ impl Controller {
                 }
                 (HotkeyEvent::CommandDown { .. }, _) => {}
                 // Release: hold-to-talk completes, a quick tap toggles.
-                (HotkeyEvent::CommandUp, RecState::HoldUncertain)
+                (HotkeyEvent::CommandUp { released_at }, RecState::HoldUncertain)
                     if self.command_active.load(Ordering::Relaxed) =>
                 {
-                    let elapsed = press_at.map(|t| t.elapsed()).unwrap_or_default();
+                    let elapsed = press_at
+                        .map(|t| released_at.saturating_duration_since(t))
+                        .unwrap_or_default();
                     let tap_threshold = Duration::from_millis(
                         self.settings.get().tap_threshold_ms.max(MIN_TAP_THRESHOLD_MS) as u64,
                     );
@@ -453,7 +470,7 @@ impl Controller {
                         state = RecState::Toggled;
                     }
                 }
-                (HotkeyEvent::CommandUp, _) => {}
+                (HotkeyEvent::CommandUp { .. }, _) => {}
             }
         }
     }

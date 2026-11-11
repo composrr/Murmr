@@ -21,6 +21,9 @@ use crossbeam_channel::Sender;
 use parking_lot::{Mutex, RwLock};
 use rdev::{grab, Event, EventType, Key};
 
+#[cfg(all(target_os = "macos", feature = "hotkey-selftest"))]
+pub mod selftest_macos;
+
 /// How long we wait after a bare-modifier dictation key press before
 /// committing to "this is a dictation hold" vs "this is a modifier in a
 /// combo like Ctrl+V". Anything shorter and we can't reliably catch the
@@ -197,7 +200,12 @@ pub enum HotkeyEvent {
     /// timestamp the controller's tap-vs-hold threshold ends up effectively
     /// 80ms higher than the user configured.
     DictationDown { pressed_at: Instant },
-    DictationUp,
+    /// `released_at` is the moment the user physically let go, stamped on
+    /// the hook thread. The controller compares it to `pressed_at` for
+    /// tap-vs-hold. It must NOT use "now" when it handles the event: on
+    /// macOS, starting the mic takes ~250ms, so a quick tap's release sat
+    /// in the queue that long and every tap was misread as a hold.
+    DictationUp { released_at: Instant },
     EscDown,
     RepeatLast,
     /// Pop the last transcript into an editable HUD bubble.
@@ -206,7 +214,7 @@ pub enum HotkeyEvent {
     /// Command hotkey pressed: record a spoken instruction for the selection.
     CommandDown { pressed_at: Instant },
     /// Command hotkey released (drives tap-vs-hold like `DictationUp`).
-    CommandUp,
+    CommandUp { released_at: Instant },
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +590,9 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                         "[hotkey] first keyboard event received — hook is live",
                     );
                 }
+                // When this key event happened. Release events carry it so
+                // tap-vs-hold timing isn't skewed by controller backlog.
+                let event_at = Instant::now();
                 let cfg = *cfg_for_cb.read();
                 let dict_main_is_modifier = chord_main_key_is_modifier(&cfg.dictation);
                 let dict_is_multi_mod = chord_is_multi_modifier(&cfg.dictation);
@@ -702,10 +713,17 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                         // timer is stale.
                                         if pp.pressed_at == Some(press_at) && !pp.committed {
                                             pp.committed = true;
-                                            drop(pp);
+                                            // Send BEFORE releasing the lock. If we
+                                            // dropped it first, a release landing in
+                                            // that gap would see `committed`, send
+                                            // DictationUp, and reach the controller
+                                            // ahead of this DictationDown — leaving
+                                            // a recording stuck open. The channel is
+                                            // unbounded, so this never blocks.
                                             let _ = tx_for_thread.send(
                                                 HotkeyEvent::DictationDown { pressed_at: press_at },
                                             );
+                                            drop(pp);
                                         } else {
                                             crate::perf_log::append(
                                                 "[hotkey] bare-modifier dictation cancelled before commit (combo or early release)",
@@ -820,7 +838,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                     (committed, tap_at)
                                 };
                                 if was_committed {
-                                    (Some(HotkeyEvent::DictationUp), false)
+                                    (Some(HotkeyEvent::DictationUp { released_at: event_at }), false)
                                 } else if let Some(press_at) = tap_press_at {
                                     // Ordered send: DictationDown enqueues here,
                                     // the returned DictationUp lands on the same
@@ -828,7 +846,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                     let _ = tx_for_cb.send(HotkeyEvent::DictationDown {
                                         pressed_at: press_at,
                                     });
-                                    (Some(HotkeyEvent::DictationUp), false)
+                                    (Some(HotkeyEvent::DictationUp { released_at: event_at }), false)
                                 } else {
                                     (None, false)
                                 }
@@ -836,7 +854,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                                 // Mirror the press-side suppression for the
                                 // dictation key release (so push-to-talk's
                                 // release closes the recording cleanly).
-                                (Some(HotkeyEvent::DictationUp), true)
+                                (Some(HotkeyEvent::DictationUp { released_at: event_at }), true)
                             }
                         } else if press_was_suppressed {
                             // We consumed this key's press as a hotkey
@@ -848,7 +866,7 @@ pub fn spawn(tx: Sender<HotkeyEvent>, initial_config: HotkeyConfig) {
                             // when repeat is Ctrl+Shift+V) also has its
                             // release pass through.
                             if cfg.command.map(|c| c.key == k).unwrap_or(false) {
-                                (Some(HotkeyEvent::CommandUp), true)
+                                (Some(HotkeyEvent::CommandUp { released_at: event_at }), true)
                             } else {
                                 (None, true)
                             }
