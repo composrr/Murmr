@@ -14,6 +14,10 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+---
+
+## v0.1.76 — Back on the graphics card
+
 ### Fixed
 
 - **Murmr no longer gets stuck on the slow CPU path.** If Murmr was closed
