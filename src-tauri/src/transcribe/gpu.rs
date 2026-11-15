@@ -41,6 +41,16 @@ pub const PROBE_ARG: &str = "--murmr-gpu-probe";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 const CACHE_FILE: &str = "gpu-probe.json";
 const MARKER_FILE: &str = "gpu-inflight.marker";
+/// Consecutive sessions that died with GPU work in flight ("<version> <n>").
+const STRIKES_FILE: &str = "gpu-strikes.txt";
+/// Sessions that may die mid-GPU-work before the GPU is turned off for this
+/// version. One death is usually not the GPU (the updater, a shutdown, or the
+/// user quitting mid-dictation), so the first one only triggers a re-check.
+const MAX_STRIKES: u32 = 2;
+/// Set next to VK_LOADER_DRIVERS_DISABLE when Murmr itself set it, so a
+/// process started by Murmr (in-app Restart, the GPU check) can tell an
+/// inherited value from one the user chose.
+const OURS_ENV: &str = "MURMR_VK_DRIVERS_DISABLED";
 
 static APP_DATA: OnceLock<PathBuf> = OnceLock::new();
 
@@ -158,6 +168,30 @@ pub fn clear_cache() {
     if let Some(p) = data_path(MARKER_FILE) {
         let _ = std::fs::remove_file(p);
     }
+    clear_strikes();
+}
+
+fn read_strikes() -> u32 {
+    let Some(raw) = data_path(STRIKES_FILE).and_then(|p| std::fs::read_to_string(p).ok()) else {
+        return 0;
+    };
+    let mut it = raw.split_whitespace();
+    match (it.next(), it.next().and_then(|n| n.parse().ok())) {
+        (Some(v), Some(n)) if v == app_version() => n,
+        _ => 0,
+    }
+}
+
+fn write_strikes(n: u32) {
+    if let Some(p) = data_path(STRIKES_FILE) {
+        let _ = std::fs::write(p, format!("{} {n}", app_version()));
+    }
+}
+
+fn clear_strikes() {
+    if let Some(p) = data_path(STRIKES_FILE) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 fn app_version() -> String {
@@ -172,6 +206,7 @@ fn app_version() -> String {
 /// [`run_probe_blocking`] in the background, hot-swapping to GPU on success.
 pub fn startup_verdict(app_data_dir: &Path, force_cpu: bool) -> Option<GpuVerdict> {
     let _ = APP_DATA.set(app_data_dir.to_path_buf());
+    drop_inherited_driver_disable();
     isolate_vulkan_layers();
 
     if !compiled_with_gpu() {
@@ -183,26 +218,38 @@ pub fn startup_verdict(app_data_dir: &Path, force_cpu: bool) -> Option<GpuVerdic
         });
     }
 
-    // A GPU load/decode was in flight when the previous session died.
+    // A GPU load/decode was in flight when the previous session died. Once is
+    // usually not the GPU (the updater closing Murmr, a shutdown, quitting
+    // mid-dictation), so the first time only re-checks the GPU; only repeated
+    // deaths turn it off for this version.
+    let mut recheck = false;
     if let Some(marker) = data_path(MARKER_FILE) {
         if marker.exists() {
             let _ = std::fs::remove_file(&marker);
-            let v = GpuVerdict {
-                version: app_version(),
-                ok: false,
-                device: read_cache().and_then(|c| c.device),
-                note: Some(
-                    "Murmr switched to CPU after a GPU problem in a previous session.".into(),
-                ),
-            };
-            perf_log::append("[gpu] in-flight marker found → previous session died in GPU code; using CPU");
-            write_cache(&v);
-            disable_gpu_drivers_in_process();
-            return Some(v);
+            let strikes = read_strikes() + 1;
+            write_strikes(strikes);
+            if strikes >= MAX_STRIKES {
+                let v = GpuVerdict {
+                    version: app_version(),
+                    ok: false,
+                    device: read_cache().and_then(|c| c.device),
+                    note: Some(
+                        "Murmr switched to CPU after a GPU problem in a previous session.".into(),
+                    ),
+                };
+                perf_log::append(&format!(
+                    "[gpu] in-flight marker found ({strikes} sessions in a row died in GPU code); using CPU"
+                ));
+                write_cache(&v);
+                disable_gpu_drivers_in_process();
+                return Some(v);
+            }
+            perf_log::append("[gpu] in-flight marker found (first time) → re-checking the GPU");
+            recheck = true;
         }
     }
 
-    let cached = read_cache().filter(|c| c.version == app_version());
+    let cached = read_cache().filter(|c| c.version == app_version() && !recheck);
 
     if force_cpu {
         // Keep driver code out of the process entirely. Toggling the GPU back
@@ -256,6 +303,10 @@ fn spawn_probe(probe_model: &Path) -> Result<String, String> {
 
     let exe = std::env::current_exe().map_err(|e| format!("probe: current_exe: {e}"))?;
     let mut cmd = Command::new(exe);
+    // The check must see the real drivers, never a disable Murmr set for itself.
+    if std::env::var_os(OURS_ENV).is_some() {
+        cmd.env_remove("VK_LOADER_DRIVERS_DISABLE").env_remove(OURS_ENV);
+    }
     cmd.arg(PROBE_ARG)
         .arg(probe_model)
         .stdin(Stdio::null())
@@ -305,6 +356,7 @@ pub fn maybe_run_probe_and_exit() {
     let Some(i) = args.iter().position(|a| a == PROBE_ARG) else {
         return;
     };
+    drop_inherited_driver_disable();
     isolate_vulkan_layers();
     let model = args.get(i + 1).cloned().unwrap_or_default();
     let code = probe_in_this_process(&model);
@@ -419,8 +471,23 @@ fn isolate_vulkan_layers() {
 /// devices and never runs driver code. Must run before the first model load.
 fn disable_gpu_drivers_in_process() {
     if cfg!(windows) {
-        set_env_if_unset("VK_LOADER_DRIVERS_DISABLE", "*");
+        if std::env::var_os("VK_LOADER_DRIVERS_DISABLE").is_none() {
+            std::env::set_var("VK_LOADER_DRIVERS_DISABLE", "*");
+            std::env::set_var(OURS_ENV, "1");
+        }
         DRIVERS_DISABLED.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// A process started by Murmr (the in-app Restart button) inherits Murmr's
+/// environment, including a driver disable the previous process set for
+/// itself. Left in place, the new process — and its GPU check — would see no
+/// GPU at all and wrongly decide this PC has none. Remove it.
+fn drop_inherited_driver_disable() {
+    if cfg!(windows) && std::env::var_os(OURS_ENV).is_some() {
+        std::env::remove_var("VK_LOADER_DRIVERS_DISABLE");
+        std::env::remove_var(OURS_ENV);
+        perf_log::append("[gpu] cleared a GPU-off setting inherited from the previous Murmr process");
     }
 }
 
@@ -436,6 +503,7 @@ pub fn clear_inflight_marker() {
     if let Some(p) = data_path(MARKER_FILE) {
         let _ = std::fs::remove_file(p);
     }
+    clear_strikes();
 }
 
 /// GPU drivers were kept out of this process at startup; using the GPU now

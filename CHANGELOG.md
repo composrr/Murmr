@@ -14,6 +14,17 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+### Fixed
+
+- **Murmr no longer gets stuck on the slow CPU path.** If Murmr was closed
+  mid-dictation (for example by an update), it assumed the graphics card was
+  faulty and stopped using it for the rest of that version. Now one
+  interruption just re-checks the graphics card; only repeated ones switch it
+  off.
+- **"Retry GPU" works with the in-app Restart button.** The restarted Murmr
+  inherited a hidden "GPU off" setting from the old one, so the check saw no
+  graphics card and wrongly decided the computer didn't have one.
+
 ---
 
 ## v0.1.75 — The Mac hotkey works first try
