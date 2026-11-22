@@ -216,7 +216,7 @@ jobs:
             ${{ matrix.sig-glob }}
             ${{ matrix.extra-installer-glob }}
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   # ---------------------------------------------------------------------------
   # Stitch latest.json + publish the GitHub Release.
