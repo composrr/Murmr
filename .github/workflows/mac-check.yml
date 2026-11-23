@@ -20,7 +20,9 @@ env:
 jobs:
   compile:
     name: Compile macOS (aarch64)
-    runs-on: macos-latest
+    # macOS jobs run on Jon's Mac (self-hosted runner, free). If it's off, fall back to GitHub's Macs:
+    #   gh variable set MAC_RUNNER -b '"macos-15"' -R <repo>   (delete the variable to switch back)
+    runs-on: ${{ fromJSON(vars.MAC_RUNNER || '["self-hosted","macOS","jon-mac"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +41,7 @@ jobs:
           key: macos-check-aarch64
 
       - name: Install libomp (macOS)
-        run: brew install libomp
+        run: brew list libomp >/dev/null 2>&1 || brew install libomp
         shell: bash
 
       - name: Install npm dependencies
