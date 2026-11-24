@@ -63,11 +63,11 @@ export default function Name(props: StepProps) {
           }}
           placeholder="Jon"
           maxLength={32}
-          className="w-full text-[16px] font-serif text-text-primary border border-border-control rounded-[10px] px-4 py-[10px] bg-bg-row placeholder:text-text-quaternary placeholder:font-sans placeholder:text-[14px] focus:outline-none focus:border-text-quaternary"
+          className="w-full text-[16px] text-text-primary border border-border-control rounded-[10px] px-4 py-[10px] bg-bg-row placeholder:text-text-quaternary placeholder:font-sans placeholder:text-[14px] focus:outline-none focus:border-text-quaternary"
         />
         <p className="text-[12px] text-text-tertiary mt-3 leading-[1.55]">
           Will show as{' '}
-          <span className="font-serif text-text-primary">
+          <span className="text-text-primary">
             "Welcome back, {name.trim() || 'friend'}"
           </span>{' '}
           on the home screen.

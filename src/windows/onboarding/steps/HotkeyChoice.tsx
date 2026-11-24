@@ -90,7 +90,7 @@ export default function HotkeyChoice(props: StepProps) {
 
 function Card({ title, chord, desc }: { title: string; chord: React.ReactNode; desc: string }) {
   return (
-    <div className="rounded-[12px] bg-bg-row border border-border-hairline p-4 flex items-start gap-4">
+    <div className="glass !rounded-[16px] p-4 flex items-start gap-4">
       <div className="flex-1">
         <div className="text-[13px] text-text-primary font-medium mb-0.5">{title}</div>
         <div className="text-[12px] text-text-tertiary leading-[1.5]">{desc}</div>

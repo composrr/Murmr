@@ -29,7 +29,7 @@ export default function Hotkeys() {
   const allBound = [dictation, cancel, repeat, editLast, command].filter((k) => k.length > 0);
 
   return (
-    <div className="max-w-[640px]">
+    <div className="max-w-[720px]">
       <SettingsHeader
         title="Hotkeys"
         subtitle="Recording shortcut, re-paste shortcut, cancel key, and tap-vs-hold threshold."
@@ -54,7 +54,7 @@ export default function Hotkeys() {
         }
       >
         <div className="flex items-center gap-2 w-[260px]">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <HotkeyCapture
               value={repeat || 'click to set'}
               onChange={(next) => update({ repeat_hotkey: next })}
@@ -66,7 +66,7 @@ export default function Hotkeys() {
           {repeat && (
             <button
               onClick={() => update({ repeat_hotkey: '' })}
-              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 h-[26px] rounded-full hover:bg-bg-control transition-colors"
               title="Disable re-paste shortcut"
             >
               clear
@@ -84,7 +84,7 @@ export default function Hotkeys() {
         }
       >
         <div className="flex items-center gap-2 w-[260px]">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <HotkeyCapture
               value={editLast || 'click to set'}
               onChange={(next) => update({ edit_last_hotkey: next })}
@@ -96,7 +96,7 @@ export default function Hotkeys() {
           {editLast && (
             <button
               onClick={() => update({ edit_last_hotkey: '' })}
-              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 h-[26px] rounded-full hover:bg-bg-control transition-colors"
               title="Disable edit-last shortcut"
             >
               clear
@@ -115,7 +115,7 @@ export default function Hotkeys() {
         }
       >
         <div className="flex items-center gap-2 w-[260px]">
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <HotkeyCapture
               value={command || 'click to set'}
               onChange={(next) => update({ command_hotkey: next })}
@@ -127,7 +127,7 @@ export default function Hotkeys() {
           {command && (
             <button
               onClick={() => update({ command_hotkey: '' })}
-              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 py-1 rounded-[6px]"
+              className="text-[11px] text-text-tertiary hover:text-text-primary px-2 h-[26px] rounded-full hover:bg-bg-control transition-colors"
               title="Disable command shortcut"
             >
               clear
@@ -160,7 +160,7 @@ export default function Hotkeys() {
               update({ tap_threshold_ms: parseInt(e.target.value, 10) || 250 })
             }
             disabled={!settings}
-            className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
+            className="flex-1 glass-range"
           />
           <span className="text-[12px] text-text-tertiary tabular-nums w-[56px] text-right">
             {threshold} ms

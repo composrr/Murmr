@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   deleteTranscription,
   getSettings,
@@ -7,8 +8,10 @@ import {
   reinsertText,
   searchTranscriptions,
   updateTranscriptionText,
+  usageSummary,
   userInfo,
   type Transcription,
+  type UsageSummary,
 } from '../../../lib/ipc';
 import { dateGroup, formatTime } from '../../../lib/format';
 import { displayName } from './HotkeyCapture';
@@ -74,6 +77,30 @@ export default function Home() {
   }, [debouncedQuery]);
 
   const grouped = useMemo(() => groupByDate(items), [items]);
+
+  // Glance tiles: today's words, overall pace, streak.
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
+  useEffect(() => {
+    const load = () => usageSummary().then(setUsage).catch(() => {});
+    load();
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    listenTranscriptionSaved(load).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+  const todayWords = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return items
+      .filter((i) => i.created_at >= start.getTime())
+      .reduce((sum, i) => sum + i.word_count, 0);
+  }, [items]);
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     // Prefer the user-supplied display name from onboarding/settings; fall
@@ -95,7 +122,7 @@ export default function Home() {
       } catch {}
     })();
   }, []);
-  const greeting = name ? `Welcome back, ${name}` : 'Welcome back';
+  const greeting = `${timeGreeting()}${name ? `, ${name}` : ''}`;
 
   const showToast = (t: Toast) => {
     setToast(t);
@@ -156,39 +183,56 @@ export default function Home() {
     }
   };
 
+  const t = usage?.totals;
+  const pace = t && t.total_speech_ms > 0 ? Math.round((t.total_words * 60_000) / t.total_speech_ms) : null;
+
   return (
-    <div className="max-w-[760px] mx-auto">
-      <h1 className="font-serif text-[30px] tracking-[-0.4px] text-text-primary mb-2">
-        {greeting}
-      </h1>
-      <p className="text-[13px] text-text-quaternary mb-7">
-        Tap or hold{' '}
-        <kbd className="inline-block bg-bg-control border border-border-control rounded-[6px] px-[7px] py-[2px] text-[11px] font-medium text-text-primary align-[1px]">
-          {displayName(dictationKey)}
-        </kbd>{' '}
-        anywhere to dictate.
+    <div className="max-w-[820px]">
+      <h1 className="page-title fade-up">{greeting}</h1>
+      <p className="text-[13px] text-text-secondary mt-2 leading-[2]">
+        Tap or hold <KeyCap>{displayName(dictationKey)}</KeyCap> anywhere to dictate.
         {repeatKey && (
           <>
             {' '}
-            <kbd className="inline-block bg-bg-control border border-border-control rounded-[6px] px-[7px] py-[2px] text-[11px] font-medium text-text-primary align-[1px]">
-              {displayName(repeatKey)}
-            </kbd>{' '}
-            re-pastes the most recent.
+            <KeyCap>{displayName(repeatKey)}</KeyCap> pastes the last one again.
           </>
         )}
       </p>
 
-      <div className="relative mb-6">
+      <div className="grid grid-cols-3 gap-3 mt-6 fade-up">
+        <Glance label="Today" value={todayWords.toLocaleString()} unit={todayWords === 1 ? 'word' : 'words'} />
+        <Glance label="Pace" value={pace !== null ? String(pace) : '—'} unit="wpm" />
+        <Link
+          to="/insights"
+          className="glass !rounded-[14px] px-[18px] py-[14px] block group hover:!border-border-control transition-colors"
+        >
+          <div className="eyebrow">Streak</div>
+          <div className="flex items-baseline justify-between mt-1">
+            <span className="num text-[22px] font-semibold tracking-[-0.6px] text-text-primary">
+              {t ? t.current_streak : '—'}{' '}
+              <span className="text-[12px] text-text-tertiary font-medium tracking-normal">
+                {t?.current_streak === 1 ? 'day' : 'days'}
+              </span>
+            </span>
+            <span className="text-[12px] font-medium text-accent transition-transform group-hover:translate-x-[2px]">
+              See insights →
+            </span>
+          </div>
+        </Link>
+      </div>
+
+      <label className="relative block mt-[18px]">
         <svg
-          width="14"
-          height="14"
+          width="15"
+          height="15"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="var(--text-quaternary)"
+          stroke="currentColor"
           strokeWidth="1.8"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+          className="absolute left-[14px] top-1/2 -translate-y-1/2 pointer-events-none text-text-tertiary"
+          aria-hidden="true"
         >
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -197,56 +241,96 @@ export default function Home() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search transcriptions"
-          className="w-full pl-9 pr-3 py-[9px] rounded-[8px] border border-border-control bg-bg-row text-[13px] text-text-primary placeholder:text-text-quaternary focus:outline-none focus:border-text-quaternary"
+          placeholder="Search everything you've said"
+          aria-label="Search transcriptions"
+          className="input-glass w-full !h-[42px] !rounded-[12px] !pl-10"
         />
-      </div>
+      </label>
 
       {error && (
-        <div className="text-[12px] text-[#e85d4a] py-2 px-3 rounded-[8px] bg-bg-row border border-border-hairline mb-4">
+        <div className="text-[12px] text-danger py-2 px-3 rounded-[10px] bg-danger/10 border border-danger/30 mt-4">
           {error}
         </div>
       )}
 
       {loading && items.length === 0 ? (
-        <p className="text-[13px] text-text-quaternary">Loading…</p>
+        <p className="text-[13px] text-text-quaternary mt-6">Loading…</p>
       ) : items.length === 0 ? (
-        <EmptyState dictationKey={dictationKey} />
+        <EmptyState dictationKey={dictationKey} searching={!!debouncedQuery} />
       ) : (
         grouped.map(([label, group]) => (
           <section key={label}>
-            <div className="text-[11px] font-medium uppercase tracking-[0.8px] text-text-quaternary mt-6 mb-3 first:mt-1">
-              {label}
+            <div className="eyebrow mt-[22px] mb-[10px]">{label}</div>
+            <div className="glass px-[18px] py-1">
+              {group.map((entry) => (
+                <Row
+                  key={entry.id}
+                  entry={entry}
+                  editing={editingId === entry.id}
+                  onCopy={() => onCopy(entry)}
+                  onReinsert={() => onReinsert(entry)}
+                  onDelete={() => onDelete(entry)}
+                  onFix={() => setEditingId(entry.id)}
+                  onCancelFix={() => setEditingId(null)}
+                  onSaveFix={(text) => onSaveFix(entry, text)}
+                />
+              ))}
             </div>
-            {group.map((entry) => (
-              <Row
-                key={entry.id}
-                entry={entry}
-                editing={editingId === entry.id}
-                onCopy={() => onCopy(entry)}
-                onReinsert={() => onReinsert(entry)}
-                onDelete={() => onDelete(entry)}
-                onFix={() => setEditingId(entry.id)}
-                onCancelFix={() => setEditingId(null)}
-                onSaveFix={(text) => onSaveFix(entry, text)}
-              />
-            ))}
           </section>
         ))
       )}
 
       {toast && (
         <div
+          role="status"
           className={
-            'fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-[12px] font-medium shadow-window border ' +
-            (toast.kind === 'ok'
-              ? 'bg-bg-content border-border-control text-text-primary'
-              : 'bg-bg-content border-[#e85d4a] text-[#e85d4a]')
+            'fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 h-[36px] flex items-center rounded-full text-[12px] font-medium border fade-up ' +
+            (toast.kind === 'ok' ? 'border-border-control text-text-primary' : 'border-danger/40 text-danger')
           }
+          style={{
+            background: 'var(--bg-popover)',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.4), var(--glass-highlight)',
+          }}
         >
           {toast.message}
         </div>
       )}
+    </div>
+  );
+}
+
+function timeGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return 'Good evening';
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function KeyCap({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd
+      className="inline-flex items-center h-[22px] px-[8px] mx-[2px] rounded-[7px] text-[11.5px] font-medium text-text-primary align-middle"
+      style={{
+        background: 'var(--glass-bg-strong)',
+        border: '1px solid var(--border-control)',
+        boxShadow: 'var(--glass-highlight), 0 1px 0 rgba(0,0,0,0.3)',
+        fontFamily: 'inherit',
+      }}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+function Glance({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <div className="glass !rounded-[14px] px-[18px] py-[14px]">
+      <div className="eyebrow">{label}</div>
+      <div className="num text-[22px] font-semibold tracking-[-0.6px] mt-1 text-text-primary">
+        {value}{' '}
+        <span className="text-[12px] text-text-tertiary font-medium tracking-normal">{unit}</span>
+      </div>
     </div>
   );
 }
@@ -274,14 +358,19 @@ function Row({
     return <FixRow entry={entry} onCancel={onCancelFix} onSave={onSaveFix} />;
   }
   return (
-    <article className="group flex items-start gap-5 py-4 border-b border-border-hairline last:border-b-0 relative">
-      <span className="text-[12px] text-text-quaternary min-w-[64px] pt-[3px] tabular-nums">
-        {formatTime(entry.created_at)}
-      </span>
-      <p className="font-serif text-[14px] leading-[1.6] text-text-primary flex-1 m-0">
+    <article className="group flex items-start gap-[18px] py-[14px] border-b border-border-hairline last:border-b-0 relative">
+      <div className="w-[70px] flex-none pt-[2px]">
+        <div className="num text-[12px] text-text-secondary">{formatTime(entry.created_at)}</div>
+        {entry.target_app && (
+          <div className="text-[11px] text-text-quaternary mt-[3px] truncate" title={entry.target_app}>
+            {entry.target_app.replace(/\.(exe|app)$/i, '')}
+          </div>
+        )}
+      </div>
+      <p className="text-[14px] leading-[1.6] text-text-primary flex-1 m-0 select-text">
         {entry.text}
       </p>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+      <div className="flex items-center gap-[6px] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
         <ActionButton title="Fix a misheard word" onClick={onFix}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 20h9" />
@@ -326,8 +415,8 @@ function FixRow({
 }) {
   const [draft, setDraft] = useState(entry.text);
   return (
-    <article className="flex items-start gap-5 py-4 border-b border-border-hairline last:border-b-0">
-      <span className="text-[12px] text-text-quaternary min-w-[64px] pt-[9px] tabular-nums">
+    <article className="flex items-start gap-[18px] py-[14px] border-b border-border-hairline last:border-b-0">
+      <span className="num text-[12px] text-text-secondary w-[70px] flex-none pt-[9px]">
         {formatTime(entry.created_at)}
       </span>
       <div className="flex-1 flex flex-col gap-2">
@@ -346,22 +435,16 @@ function FixRow({
               onCancel();
             }
           }}
-          className="w-full font-serif text-[14px] leading-[1.6] text-text-primary px-3 py-[6px] rounded-[8px] border border-border-control bg-bg-row resize-y focus:outline-none focus:border-text-quaternary"
+          className="w-full text-[14px] leading-[1.6] text-text-primary px-3 py-2 rounded-[10px] border border-accent/50 bg-bg-content resize-y outline-none shadow-[0_0_0_3px_rgb(var(--accent-rgb)/0.12)]"
         />
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-text-quaternary mr-auto">
             Fix misheard names or terms and Murmr will suggest dictionary entries.
           </span>
-          <button
-            onClick={onCancel}
-            className="text-[12px] text-text-secondary px-3 py-[5px] rounded-full hover:text-text-primary"
-          >
+          <button onClick={onCancel} className="btn-ghost !h-[30px] !text-[12px]">
             Cancel
           </button>
-          <button
-            onClick={() => onSave(draft)}
-            className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-[14px] py-[5px]"
-          >
+          <button onClick={() => onSave(draft)} className="btn-primary !h-[30px] !text-[12px]">
             Save
           </button>
         </div>
@@ -383,21 +466,24 @@ function ActionButton({
     <button
       title={title}
       onClick={onClick}
-      className="w-7 h-7 grid place-items-center rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-control transition-colors"
+      aria-label={title}
+      className="w-[30px] h-[30px] grid place-items-center rounded-[9px] text-text-secondary border border-border-hairline bg-bg-control hover:text-text-primary hover:bg-bg-selected hover:border-border-control transition-colors"
     >
       {children}
     </button>
   );
 }
 
-function EmptyState({ dictationKey }: { dictationKey: string }) {
+function EmptyState({ dictationKey, searching }: { dictationKey: string; searching: boolean }) {
   return (
-    <div className="mt-12 text-center">
-      <p className="font-serif text-[18px] text-text-secondary mb-2">
-        Your transcriptions will appear here.
+    <div className="glass mt-6 px-6 py-12 text-center">
+      <p className="text-[16px] font-semibold text-text-primary mb-2">
+        {searching ? 'Nothing matches that search.' : 'Your dictations will show up here.'}
       </p>
-      <p className="text-[12px] text-text-quaternary">
-        Press {displayName(dictationKey)} in any text field to give Murmr a try.
+      <p className="text-[12.5px] text-text-tertiary">
+        {searching
+          ? 'Try a different word.'
+          : `Press ${displayName(dictationKey)} in any text field to give Murmr a try.`}
       </p>
     </div>
   );

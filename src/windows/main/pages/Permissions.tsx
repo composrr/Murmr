@@ -136,7 +136,7 @@ export default function Permissions() {
 
   if (!mac) {
     return (
-      <div className="max-w-[640px]">
+      <div className="max-w-[720px]">
         <SettingsHeader
           title="Permissions"
           subtitle="Murmr doesn’t need any special system permissions on this platform — you’re all set."
@@ -151,7 +151,7 @@ export default function Permissions() {
   const anyChecked = Object.keys(statuses).length > 0;
 
   return (
-    <div className="max-w-[640px]">
+    <div className="max-w-[720px]">
       <SettingsHeader
         title="Permissions"
         subtitle="macOS gates the three things Murmr needs. Green means you’re good to go; anything else opens the right settings so you can flip it on."
@@ -203,17 +203,20 @@ function SummaryBanner({
       ? 'You’re all set — every permission Murmr needs is enabled.'
       : `${total - grantedCount} of ${total} still need your attention.`;
 
-  const dot = !checked ? '#9d9485' : allGranted ? '#3fae5a' : '#c9a227';
+  const dot = !checked
+    ? 'var(--text-quaternary)'
+    : allGranted
+      ? 'rgb(var(--good-rgb))'
+      : 'rgb(var(--warn-rgb))';
 
   return (
     <div
-      className="flex items-center gap-3 rounded-[10px] px-4 py-3"
-      style={{
-        background: 'var(--bg-control, rgba(0,0,0,0.03))',
-        border: '0.5px solid var(--border-hairline, rgba(0,0,0,0.06))',
-      }}
+      className="glass !rounded-[14px] flex items-center gap-3 px-4 py-3"
     >
-      <span className="w-[10px] h-[10px] rounded-full flex-shrink-0" style={{ background: dot }} />
+      <span
+        className="w-[9px] h-[9px] rounded-full flex-shrink-0"
+        style={{ background: dot, boxShadow: `0 0 10px ${dot}` }}
+      />
       <span className="text-[13px] text-text-primary font-medium">{label}</span>
     </div>
   );
@@ -250,7 +253,11 @@ function PermissionCard({
         ? 'Open in System Settings'
         : 'Enable in System Settings';
 
-  const statusColor = granted ? '#3fae5a' : restricted ? '#e85d4a' : '#b78a00';
+  const statusColor = granted
+    ? 'rgb(var(--good-rgb))'
+    : restricted
+      ? 'var(--danger)'
+      : 'rgb(var(--warn-rgb))';
 
   // The whole card is one tap target. Restricted (MDM) can't be changed, so
   // it's non-interactive; everything else deep-links to its own pane (or
@@ -262,12 +269,12 @@ function PermissionCard({
       disabled={restricted || requesting}
       aria-label={`${perm.title}: ${statusLabel}. ${restricted ? '' : actionLabel}`}
       className={
-        'w-full text-left flex items-center gap-3.5 rounded-[12px] px-4 py-3.5 border transition-colors ' +
+        'w-full text-left flex items-center gap-3.5 rounded-[16px] px-4 py-3.5 border transition-colors backdrop-blur-[24px] ' +
         (granted
-          ? 'border-border-hairline bg-bg-content hover:bg-bg-control'
+          ? 'border-border-hairline bg-bg-row hover:bg-bg-control'
           : restricted
-            ? 'border-border-hairline bg-bg-content cursor-default'
-            : 'border-[#e6d9a8] bg-[#fbf7e9]/40 hover:bg-[#fbf7e9]/70 dark:border-[#5a4f2e] dark:bg-[#2a2618]/40 dark:hover:bg-[#2a2618]/70')
+            ? 'border-border-hairline bg-bg-row cursor-default'
+            : 'border-warn/35 bg-warn/[0.07] hover:bg-warn/[0.12]')
       }
     >
       <StatusIcon granted={granted} pending={status === undefined} />
@@ -327,7 +334,7 @@ function StatusIcon({ granted, pending }: { granted: boolean; pending: boolean }
   };
   if (granted) {
     return (
-      <span className="mt-[1px] flex-shrink-0" style={{ color: '#3fae5a' }}>
+      <span className="mt-[1px] flex-shrink-0" style={{ color: 'rgb(var(--good-rgb))' }}>
         <svg {...base}>
           <circle cx="12" cy="12" r="10" />
           <path d="M8 12l2.5 2.5L16 9" />
@@ -338,7 +345,7 @@ function StatusIcon({ granted, pending }: { granted: boolean; pending: boolean }
   return (
     <span
       className="mt-[1px] flex-shrink-0"
-      style={{ color: pending ? '#9d9485' : '#c9a227' }}
+      style={{ color: pending ? 'var(--text-quaternary)' : 'rgb(var(--warn-rgb))' }}
     >
       <svg {...base}>
         <circle cx="12" cy="12" r="10" />

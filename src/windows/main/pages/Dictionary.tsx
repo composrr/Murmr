@@ -12,6 +12,7 @@ import {
   type DictionarySuggestion,
   type DictionaryType,
 } from '../../../lib/ipc';
+import { Toggle } from './settings-ui';
 
 type Filter = 'all' | DictionaryType;
 
@@ -106,24 +107,19 @@ export default function Dictionary() {
   }, [entries]);
 
   return (
-    <div className="max-w-[840px] mx-auto">
-      <div className="flex items-center justify-between mb-1.5">
-        <h1 className="font-serif text-[30px] tracking-[-0.4px] text-text-primary m-0">
-          Dictionary
-        </h1>
-        <button
-          className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[13px] font-medium rounded-full px-[18px] py-[8px]"
-          onClick={() => setEditing('new')}
-        >
-          Add new
+    <div className="max-w-[860px]">
+      <div className="flex items-end justify-between gap-6 mb-7 fade-up">
+        <div>
+          <h1 className="page-title">Dictionary</h1>
+          <p className="text-[13px] text-text-secondary mt-2 leading-[1.6] max-w-[520px]">
+            Teach Murmr the words, names and shortcuts you use most. Words help it hear you;
+            replacements and snippets are applied to every dictation.
+          </p>
+        </div>
+        <button className="btn-primary flex-none" onClick={() => setEditing('new')}>
+          <PlusIcon /> Add entry
         </button>
       </div>
-      <p className="text-[13px] text-text-quaternary mb-[22px] leading-[1.6]">
-        Teach Murmr the words, names, and shortcuts you use most.{' '}
-        <span className="text-text-tertiary">
-          Words bias recognition; replacements and snippets are applied to every transcript.
-        </span>
-      </p>
 
       {suggestions.length > 0 && (
         <Suggested
@@ -133,7 +129,8 @@ export default function Dictionary() {
         />
       )}
 
-      <div className="flex items-center gap-1 mb-[18px] pb-4 border-b border-border-hairline">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="inline-flex gap-[2px] rounded-full p-[3px] bg-bg-control border border-border-hairline">
         <Chip active={filter === 'all'} onClick={() => setFilter('all')} count={counts.all} label="All" />
         <Chip active={filter === 'word'} onClick={() => setFilter('word')} count={counts.word} label="Words" />
         <Chip
@@ -148,16 +145,34 @@ export default function Dictionary() {
           count={counts.snippet}
           label="Snippets"
         />
-        <input
-          className="ml-auto rounded-full border border-border-control bg-bg-row text-[12px] px-3 py-[6px] w-[140px]"
-          placeholder="Search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        </div>
+        <label className="relative ml-auto">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-tertiary"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            className="input-glass !h-[34px] !rounded-full w-[200px] !pl-8 !text-[12.5px]"
+            placeholder="Search"
+            aria-label="Search dictionary"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
       </div>
 
       {error && (
-        <div className="text-[12px] text-[#e85d4a] py-2 px-3 rounded-[8px] bg-bg-row border border-border-hairline mb-3">
+        <div className="text-[12px] text-danger py-2 px-3 rounded-[10px] bg-danger/10 border border-danger/30 mb-3">
           {error}
         </div>
       )}
@@ -165,21 +180,40 @@ export default function Dictionary() {
       {filtered.length === 0 ? (
         <EmptyState onAdd={() => setEditing('new')} />
       ) : (
-        filtered.map((entry) => (
-          <Row
-            key={entry.id}
-            entry={entry}
-            onEdit={() => setEditing(entry)}
-            onDelete={async () => {
-              try {
-                await deleteDictionaryEntry(entry.id);
-                refresh();
-              } catch (e) {
-                setError(String(e));
-              }
-            }}
-          />
-        ))
+        <div className="glass px-2 py-1">
+          {filtered.map((entry) => (
+            <Row
+              key={entry.id}
+              entry={entry}
+              onEdit={() => setEditing(entry)}
+              onToggle={async (enabled) => {
+                setEntries((prev) => prev.map((x) => (x.id === entry.id ? { ...x, enabled } : x)));
+                try {
+                  await updateDictionaryEntry({
+                    id: entry.id,
+                    entry_type: entry.type,
+                    trigger: entry.trigger,
+                    expansion: entry.expansion,
+                    description: entry.description,
+                    is_regex: entry.is_regex,
+                    enabled,
+                  });
+                } catch (e) {
+                  setError(String(e));
+                  refresh();
+                }
+              }}
+              onDelete={async () => {
+                try {
+                  await deleteDictionaryEntry(entry.id);
+                  refresh();
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+            />
+          ))}
+        </div>
       )}
 
       {editing && (
@@ -206,51 +240,47 @@ function Suggested({
   onDismiss: (s: DictionarySuggestion) => void;
 }) {
   return (
-    <section className="mb-[22px] rounded-card border border-border-hairline bg-bg-row px-4 pt-3 pb-1">
-      <div className="flex items-baseline justify-between mb-1">
-        <h2 className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium m-0">
-          Suggested
-          <span className="ml-[6px] normal-case tracking-normal">{items.length}</span>
-        </h2>
-        <span className="text-[11px] text-text-quaternary">
-          From words you corrected. Nothing is added until you accept it.
-        </span>
+    <section className="glass overflow-hidden mb-6 px-5 pt-4 pb-1 fade-up">
+      <div className="card-glow" aria-hidden="true" />
+      <div className="relative flex items-start justify-between gap-4 mb-1">
+        <div>
+          <h2 className="text-[15px] font-semibold tracking-[-0.2px] text-text-primary m-0 flex items-center gap-2">
+            <span className="w-[7px] h-[7px] rounded-full bg-accent shadow-[0_0_10px_rgb(var(--accent-rgb)/0.8)]" />
+            Suggested from your fixes
+            <span className="num text-[12px] font-medium text-text-tertiary">{items.length}</span>
+          </h2>
+          <p className="text-[12px] text-text-tertiary mt-1">
+            Nothing is added until you say so.
+          </p>
+        </div>
       </div>
       {items.map((s) => (
         <div
           key={s.id}
-          className="flex items-center gap-4 py-[10px] border-b border-border-hairline last:border-b-0"
+          className="relative flex items-center gap-4 py-3 border-b border-border-hairline last:border-b-0"
           title={s.example ? `You wrote: “${s.example}”` : undefined}
         >
-          <span className="text-[9px] uppercase tracking-[0.6px] text-text-quaternary font-medium w-[92px]">
-            {TYPE_LABEL[s.type]}
-          </span>
-          <span className="font-serif text-[16px] text-text-primary flex-1 m-0 min-w-0 truncate">
+          <TypeBadge type={s.type} />
+          <span className="text-[14px] text-text-primary flex-1 m-0 min-w-0 truncate">
             {s.type === 'word' ? (
               s.trigger
             ) : (
               <>
                 {s.trigger}
                 <span className="text-text-quaternary mx-2">→</span>
-                {s.expansion}
+                <span className="text-accent">{s.expansion}</span>
               </>
             )}
           </span>
           {s.count > 1 && (
-            <span className="text-[11px] text-text-tertiary tabular-nums whitespace-nowrap">
+            <span className="num text-[11px] text-text-tertiary whitespace-nowrap">
               Fixed {s.count}×
             </span>
           )}
-          <button
-            onClick={() => onDismiss(s)}
-            className="text-[12px] text-text-secondary px-3 py-[5px] rounded-full hover:text-text-primary hover:bg-bg-control"
-          >
+          <button onClick={() => onDismiss(s)} className="btn-ghost !h-[28px] !text-[12px]">
             Dismiss
           </button>
-          <button
-            onClick={() => onAccept(s)}
-            className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-[14px] py-[5px]"
-          >
+          <button onClick={() => onAccept(s)} className="btn-primary !h-[28px] !text-[12px] !px-[14px]">
             Add
           </button>
         </div>
@@ -274,15 +304,18 @@ function Chip({
     <button
       onClick={onClick}
       className={
-        'rounded-full text-[12px] px-[14px] py-[6px] ' +
-        (active
-          ? 'bg-[#1f1f1c] dark:bg-[#d4d4cf] text-[#fafaf9] dark:text-[#1f1f1c] font-medium'
-          : 'bg-transparent text-text-secondary hover:text-text-primary')
+        'rounded-full text-[12px] h-[28px] px-[13px] transition-colors ' +
+        (active ? 'text-text-primary font-medium' : 'bg-transparent text-text-tertiary hover:text-text-primary')
+      }
+      style={
+        active
+          ? { background: 'var(--nav-active)', boxShadow: 'var(--glass-highlight), 0 0 0 1px var(--glass-border)' }
+          : undefined
       }
     >
       {label}
       {typeof count === 'number' && (
-        <span className={(active ? 'opacity-70 ' : 'text-text-quaternary ') + 'ml-[4px]'}>
+        <span className="num text-text-quaternary ml-[5px]">
           {count}
         </span>
       )}
@@ -293,34 +326,35 @@ function Chip({
 function Row({
   entry,
   onEdit,
+  onToggle,
   onDelete,
 }: {
   entry: DictionaryEntry;
   onEdit: () => void;
+  onToggle: (enabled: boolean) => void;
   onDelete: () => void;
 }) {
   return (
     <div
-      className="group flex items-center gap-4 py-[14px] border-b border-border-hairline last:border-b-0 cursor-pointer"
+      className={
+        'group flex items-center gap-4 px-3 py-3 border-b border-border-hairline last:border-b-0 cursor-pointer rounded-[12px] hover:bg-bg-row transition-colors ' +
+        (entry.enabled ? '' : 'opacity-55')
+      }
       onClick={onEdit}
     >
-      <span className="text-[9px] uppercase tracking-[0.6px] text-text-quaternary font-medium w-[92px]">
-        {TYPE_LABEL[entry.type]}
-      </span>
-      <span className="font-serif text-[16px] text-text-primary flex-1 m-0">
+      <TypeBadge type={entry.type} />
+      <span className="text-[14px] text-text-primary flex-1 min-w-0 truncate">
         {entry.type === 'word' ? (
           entry.trigger
         ) : (
           <>
             {entry.trigger}
             <span className="text-text-quaternary mx-2">→</span>
-            <span className={entry.type === 'snippet' ? 'text-text-secondary text-[14px]' : ''}>
-              {entry.expansion}
-            </span>
+            <span className="text-text-secondary">{entry.expansion}</span>
           </>
         )}
       </span>
-      <span className="text-[12px] text-text-quaternary mr-2">
+      <span className="text-[12px] text-text-tertiary truncate max-w-[220px]">
         {entry.description ?? TYPE_HINT[entry.type]}
       </span>
       <button
@@ -328,10 +362,11 @@ function Row({
           e.stopPropagation();
           onDelete();
         }}
-        className="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 grid place-items-center rounded-md text-text-tertiary hover:text-[#e85d4a] hover:bg-bg-control"
+        className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity w-[30px] h-[30px] grid place-items-center rounded-[9px] text-text-tertiary hover:text-danger hover:bg-danger/10"
         title="Delete"
+        aria-label={`Delete ${entry.trigger}`}
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <polyline points="3 6 5 6 21 6" />
           <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
           <path d="M10 11v6" />
@@ -339,23 +374,41 @@ function Row({
           <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
         </svg>
       </button>
+      <span onClick={(e) => e.stopPropagation()} title={entry.enabled ? 'On' : 'Off'}>
+        <Toggle on={entry.enabled} onChange={onToggle} />
+      </span>
     </div>
+  );
+}
+
+function TypeBadge({ type }: { type: DictionaryType }) {
+  return (
+    <span className="w-[96px] flex-none">
+      <span className="inline-flex items-center h-[22px] px-[9px] rounded-full text-[10.5px] font-semibold uppercase tracking-[0.06em] text-text-secondary bg-bg-control border border-border-hairline">
+        {TYPE_LABEL[type]}
+      </span>
+    </span>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   );
 }
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="text-center mt-12">
-      <p className="font-serif text-[18px] text-text-secondary mb-2">
-        No entries yet.
+    <div className="glass text-center px-6 py-12">
+      <p className="text-[16px] font-semibold text-text-primary mb-2">
+        Nothing here yet.
       </p>
-      <p className="text-[12px] text-text-quaternary mb-4">
+      <p className="text-[12.5px] text-text-tertiary mb-5">
         Add proper nouns Whisper trips on, or shortcuts you'd like expanded automatically.
       </p>
-      <button
-        onClick={onAdd}
-        className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[13px] font-medium rounded-full px-[18px] py-[8px]"
-      >
+      <button onClick={onAdd} className="btn-primary">
         Add your first entry
       </button>
     </div>
@@ -422,31 +475,35 @@ function EditorSheet({
 
   return (
     <div
-      className="fixed inset-0 bg-black/30 grid place-items-center z-50"
+      className="fixed inset-0 grid place-items-center z-50 bg-black/50 backdrop-blur-[6px]"
       onClick={onClose}
     >
       <div
-        className="bg-bg-window border border-border-hairline rounded-card w-[440px] max-w-[92vw] p-6 shadow-window"
+        className="glass-strong w-[460px] max-w-[92vw] p-6 fade-up"
+        style={{ background: 'var(--bg-popover)', boxShadow: 'var(--glass-highlight), 0 30px 80px rgba(0,0,0,0.5)' }}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
-        <h2 className="font-serif text-[22px] tracking-[-0.3px] text-text-primary mb-4">
+        <h2 className="text-[20px] font-semibold tracking-[-0.5px] text-text-primary mb-5">
           {isNew ? 'Add entry' : 'Edit entry'}
         </h2>
 
         <div className="mb-4">
-          <div className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium mb-2">
-            Type
-          </div>
-          <div className="flex gap-[2px] bg-bg-control rounded-control p-[2px]">
+          <div className="eyebrow mb-2">Type</div>
+          <div className="flex gap-[2px] rounded-full p-[3px] bg-bg-control border border-border-hairline">
             {(['word', 'replacement', 'snippet'] as DictionaryType[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setType(t)}
                 className={
-                  'flex-1 text-[12px] py-[5px] rounded-[5px] capitalize ' +
-                  (type === t
-                    ? 'bg-bg-content text-text-primary font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)]'
-                    : 'text-text-tertiary hover:text-text-secondary')
+                  'flex-1 text-[12px] h-[28px] rounded-full capitalize transition-colors ' +
+                  (type === t ? 'text-text-primary font-medium' : 'text-text-tertiary hover:text-text-primary')
+                }
+                style={
+                  type === t
+                    ? { background: 'var(--nav-active)', boxShadow: 'var(--glass-highlight), 0 0 0 1px var(--glass-border)' }
+                    : undefined
                 }
               >
                 {t}
@@ -460,7 +517,7 @@ function EditorSheet({
             value={trigger}
             onChange={(e) => setTrigger(e.target.value)}
             placeholder={type === 'word' ? 'e.g. Murmr' : 'e.g. btw'}
-            className="w-full px-3 py-[8px] rounded-[7px] border border-border-control bg-bg-row text-[13px] text-text-primary"
+            className="input-glass w-full"
             autoFocus
           />
         </Field>
@@ -473,7 +530,7 @@ function EditorSheet({
               placeholder={
                 type === 'snippet' ? 'e.g. Best, Jon — Sent via Murmr' : 'e.g. by the way'
               }
-              className="w-full px-3 py-[8px] rounded-[7px] border border-border-control bg-bg-row text-[13px] text-text-primary"
+              className="input-glass w-full"
             />
           </Field>
         )}
@@ -483,28 +540,21 @@ function EditorSheet({
             value={description ?? ''}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What this entry is for"
-            className="w-full px-3 py-[8px] rounded-[7px] border border-border-control bg-bg-row text-[13px] text-text-primary"
+            className="input-glass w-full"
           />
         </Field>
 
         {error && (
-          <div className="text-[12px] text-[#e85d4a] py-2 px-3 rounded-[8px] bg-bg-row border border-border-hairline mb-3">
+          <div className="text-[12px] text-danger py-2 px-3 rounded-[10px] bg-danger/10 border border-danger/30 mb-3">
             {error}
           </div>
         )}
 
         <div className="flex justify-end gap-2 mt-2">
-          <button
-            onClick={onClose}
-            className="text-[13px] text-text-secondary px-3 py-[7px] rounded-full hover:text-text-primary"
-          >
+          <button onClick={onClose} className="btn-ghost">
             Cancel
           </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[13px] font-medium rounded-full px-[18px] py-[8px] disabled:opacity-50"
-          >
+          <button onClick={save} disabled={saving} className="btn-primary">
             {saving ? 'Saving…' : isNew ? 'Save' : 'Update'}
           </button>
         </div>
@@ -516,9 +566,7 @@ function EditorSheet({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3">
-      <div className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium mb-1.5">
-        {label}
-      </div>
+      <div className="eyebrow mb-[6px]">{label}</div>
       {children}
     </div>
   );

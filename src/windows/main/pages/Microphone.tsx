@@ -13,6 +13,7 @@ import {
   NativeSelect,
   Pill,
   Row,
+  SectionHeader,
   SettingsHeader,
 } from './settings-ui';
 import { createLevelNormalizer } from '../../../lib/waveform';
@@ -103,7 +104,7 @@ export default function Microphone() {
   ];
 
   return (
-    <div className="max-w-[640px]">
+    <div className="max-w-[720px]">
       <SettingsHeader
         title="Microphone"
         subtitle="Pick the input device and test the mic."
@@ -139,7 +140,7 @@ export default function Microphone() {
             value={settings?.audio_duck_amount ?? 0.8}
             onChange={(e) => update({ audio_duck_amount: parseFloat(e.target.value) })}
             disabled={!settings}
-            className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
+            className="flex-1 glass-range"
           />
           <span className="text-[12px] text-text-tertiary tabular-nums w-[44px] text-right">
             {((settings?.audio_duck_amount ?? 0.8) * 100).toFixed(0)}%
@@ -147,19 +148,16 @@ export default function Microphone() {
         </div>
       </Row>
 
-      <div className="mt-9 pt-7 border-t border-border-hairline">
-        <h2 className="font-serif text-[22px] tracking-[-0.3px] text-text-primary mt-0 mb-3">
-          Test the mic
-        </h2>
-        <p className="text-[12px] text-text-tertiary leading-[1.55] mb-4">
+      <div>
+        <SectionHeader>Test the mic</SectionHeader>
+        <p className="text-[12px] text-text-tertiary leading-[1.55] mb-3 px-1">
           Captures {TEST_SECONDS} seconds from the selected device, runs Whisper, shows the
           result. Not saved to history.
         </p>
 
         <div
           className={
-            'rounded-[14px] border bg-bg-row p-5 mb-4 transition-colors ' +
-            (test.kind === 'recording' ? 'border-[#e85d4a]/60' : 'border-border-hairline')
+            'glass p-5 mb-4 transition-colors ' + (test.kind === 'recording' ? '!border-danger/50' : '')
           }
         >
           <div className="flex items-center gap-4">
@@ -169,8 +167,8 @@ export default function Microphone() {
               className={
                 'relative w-[52px] h-[52px] rounded-full grid place-items-center transition-all flex-shrink-0 ' +
                 (test.kind === 'recording'
-                  ? 'bg-[#e85d4a] text-white shadow-[0_0_0_5px_rgba(232,93,74,0.16)]'
-                  : 'bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] hover:scale-[1.04] disabled:opacity-50')
+                  ? 'bg-danger text-white shadow-[0_0_0_6px_rgb(var(--danger-rgb)/0.18),0_0_24px_rgb(var(--danger-rgb)/0.45)]'
+                  : 'bg-text-primary text-text-on-primary hover:scale-[1.04] disabled:opacity-50')
               }
               aria-label="Run mic test"
             >
@@ -204,7 +202,7 @@ export default function Microphone() {
                         display: 'inline-block',
                         width: 3,
                         height,
-                        background: 'var(--text-secondary)',
+                        background: test.kind === 'recording' ? 'var(--text-primary)' : 'var(--text-secondary)',
                         borderRadius: 1.5,
                         opacity,
                         transition: 'height 80ms linear, opacity 80ms linear',
@@ -218,7 +216,7 @@ export default function Microphone() {
         </div>
         {test.kind === 'done' && (
           <>
-            <p className="font-serif text-[14px] text-text-primary leading-[1.55] py-3 px-3 rounded-row bg-bg-row border border-border-hairline m-0">
+            <p className="text-[14px] text-text-primary leading-[1.55] py-3 px-4 rounded-[14px] bg-bg-row border border-border-hairline m-0">
               {test.result.text || (
                 <span className="text-text-quaternary italic">(no speech detected)</span>
               )}
@@ -240,7 +238,7 @@ export default function Microphone() {
           </>
         )}
         {test.kind === 'error' && (
-          <p className="text-[12px] text-[#e85d4a] py-2 px-3 rounded-[8px] bg-bg-row border border-border-hairline">
+          <p className="text-[12px] text-danger py-2 px-3 rounded-[10px] bg-danger/10 border border-danger/30">
             {test.message}
           </p>
         )}

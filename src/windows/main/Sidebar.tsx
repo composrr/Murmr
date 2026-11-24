@@ -1,6 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import type { ComponentType, SVGProps } from 'react';
-import { isMac } from '../../lib/ipc';
+import { useEffect, useState, type ComponentType, type SVGProps } from 'react';
+import {
+  engineStatus,
+  isMac,
+  listenEngineStatus,
+  modelCatalog,
+  type CatalogModel,
+  type EngineStatus,
+} from '../../lib/ipc';
+import { useDictationStatus } from '../../hooks/useDictationStatus';
 
 interface NavItem {
   to: string;
@@ -96,19 +104,107 @@ const BOTTOM: NavItem[] = [
 export default function Sidebar({ version }: { version: string }) {
   return (
     <aside
-      className="w-[200px] bg-bg-chrome border-r border-border-hairline flex flex-col px-[10px] py-[18px] gap-[2px]"
+      className="relative w-[224px] flex-shrink-0 flex flex-col px-3 pt-5 pb-4 gap-[2px] border-r border-border-hairline"
+      style={{
+        background: 'var(--bg-chrome)',
+        backdropFilter: 'blur(40px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(40px) saturate(150%)',
+      }}
     >
+      <div className="flex items-center gap-[10px] px-3 pb-5">
+        <BrandMark />
+        <span className="text-[15px] font-semibold tracking-[-0.3px] text-text-primary">Murmr</span>
+      </div>
       {TOP.map((item) => (
         <NavItemLink key={item.to} item={item} />
       ))}
-      <div className="h-[0.5px] bg-border-hairline mx-2 my-3" />
+      <div className="eyebrow px-3 pt-6 pb-2 !text-[10.5px] !text-text-quaternary">Settings</div>
       {BOTTOM.map((item) => (
         <NavItemLink key={item.to} item={item} />
       ))}
-      <div className="mt-auto px-3 pt-2 pb-1 text-[11px] text-text-quaternary">
-        Murmr v{version}
+      <div className="mt-auto flex flex-col gap-[10px]">
+        <EngineCard />
+        <div className="px-3 text-[11px] text-text-quaternary num">Murmr v{version}</div>
       </div>
     </aside>
+  );
+}
+
+/// Live engine state: ready / listening / writing, plus model + GPU/CPU.
+function EngineCard() {
+  const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const [catalog, setCatalog] = useState<CatalogModel[]>([]);
+  const { status } = useDictationStatus();
+
+  useEffect(() => {
+    engineStatus().then(setEngine).catch(() => {});
+    modelCatalog().then(setCatalog).catch(() => {});
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    listenEngineStatus(setEngine).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  if (!engine) return null;
+
+  const busy =
+    status.kind === 'recording' || status.kind === 'command-recording'
+      ? { label: 'Listening', color: 'var(--danger)' }
+      : status.kind === 'transcribing' || status.kind === 'command-thinking'
+        ? { label: 'Writing it out', color: 'var(--accent)' }
+        : null;
+  const state = engine.loading
+    ? { label: 'Loading model', color: 'var(--accent)' }
+    : engine.last_error
+      ? { label: 'Needs attention', color: 'var(--danger)' }
+      : busy ?? { label: 'Ready', color: 'rgb(var(--good-rgb))' };
+
+  const model =
+    catalog.find((m) => m.file === engine.model_name)?.label ??
+    engine.model_name.replace(/^ggml-/, '').replace(/\.bin$/, '');
+  const backend = engine.backend.kind === 'CPU' ? 'CPU' : 'GPU';
+
+  return (
+    <div className="glass !rounded-[14px] p-3" title={engine.backend.device ?? undefined}>
+      <div className="flex items-center gap-2 text-[12px] text-text-primary">
+        <span
+          className="w-[7px] h-[7px] rounded-full"
+          style={{ background: state.color, boxShadow: `0 0 8px ${state.color}` }}
+        />
+        {state.label}
+      </div>
+      <div className="text-[11px] text-text-tertiary mt-1 truncate">
+        {model} · {backend}
+      </div>
+    </div>
+  );
+}
+
+/// Small waveform glyph in a glass tile, with the accent as the one pop.
+function BrandMark() {
+  return (
+    <span
+      className="w-[26px] h-[26px] rounded-[8px] flex items-center justify-center"
+      style={{
+        background: 'var(--glass-bg-strong)',
+        border: '1px solid var(--border-control)',
+        boxShadow: 'var(--glass-highlight)',
+      }}
+      aria-hidden="true"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeWidth="2.4">
+        <line x1="5" y1="10" x2="5" y2="14" stroke="var(--text-secondary)" />
+        <line x1="9.5" y1="6" x2="9.5" y2="18" stroke="var(--text-primary)" />
+        <line x1="14" y1="8" x2="14" y2="16" stroke="var(--accent)" />
+        <line x1="18.5" y1="10.5" x2="18.5" y2="13.5" stroke="var(--text-secondary)" />
+      </svg>
+    </span>
   );
 }
 
@@ -118,10 +214,18 @@ function NavItemLink({ item }: { item: NavItem }) {
       to={item.to}
       end={item.to === '/'}
       className={({ isActive }) =>
-        'flex items-center gap-[10px] px-3 py-2 rounded-[8px] text-[13px] transition-colors ' +
+        'relative flex items-center gap-[10px] h-[34px] px-3 rounded-[10px] text-[13px] transition-colors duration-150 ' +
         (isActive
-          ? 'bg-bg-selected text-text-primary font-medium'
-          : 'text-text-secondary hover:text-text-primary')
+          ? 'text-text-primary font-medium'
+          : 'text-text-secondary hover:text-text-primary hover:bg-bg-row')
+      }
+      style={({ isActive }) =>
+        isActive
+          ? {
+              background: 'var(--nav-active)',
+              boxShadow: 'var(--glass-highlight), 0 0 0 1px var(--glass-border)',
+            }
+          : undefined
       }
     >
       <item.Icon />

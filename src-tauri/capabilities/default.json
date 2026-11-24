@@ -8,6 +8,7 @@
     "opener:default",
     "updater:default",
     "process:allow-restart",
-    "notification:default"
+    "notification:default",
+    "core:window:allow-set-theme"
   ]
 }

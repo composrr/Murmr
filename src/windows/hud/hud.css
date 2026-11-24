@@ -31,3 +31,136 @@ body,
   padding-top: 22px;
   box-sizing: border-box;
 }
+
+/* ---------- Liquid-glass pill ----------
+ * The HUD window is transparent and frameless, so the OS cannot blur the
+ * desktop behind a pill shape. The pill is a smoky, mostly-opaque glass:
+ * readable over any background, with a bright top edge for the glass look.
+ * (backdrop-filter is kept for any in-window content behind it.) */
+.hud-pill {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  color: #f4f4f5;
+  background: linear-gradient(180deg, rgba(38, 38, 44, 0.86), rgba(14, 14, 17, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    0 6px 16px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.1px;
+  animation: hud-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.hud-panel {
+  color: #f4f4f5;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(34, 34, 40, 0.92), rgba(14, 14, 17, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 16px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+}
+
+.hud-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hud-dot-rec {
+  background: #ff4d3d;
+  box-shadow: 0 0 10px rgba(255, 77, 61, 0.85);
+  animation: hud-rec 1.4s ease-in-out infinite;
+}
+.hud-dot-cmd {
+  background: #7c9cff;
+  box-shadow: 0 0 10px rgba(124, 156, 255, 0.85);
+}
+.hud-dot-warn {
+  background: #f5b544;
+  box-shadow: 0 0 8px rgba(245, 181, 68, 0.6);
+}
+
+.hud-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: #e4e4e7;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.hud-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.hud-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+.hud-btn-ghost:hover {
+  color: #f4f4f5;
+  background: rgba(255, 255, 255, 0.06);
+}
+.hud-btn-primary {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+  color: #09090b;
+  font-weight: 600;
+}
+.hud-btn-primary:hover {
+  background: #ffffff;
+}
+
+@keyframes hud-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hud-rec {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes hudPulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-pill,
+  .hud-dot-rec {
+    animation: none;
+  }
+}

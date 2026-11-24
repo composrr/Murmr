@@ -107,7 +107,7 @@ export default function MicTest(props: StepProps) {
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
             disabled={isBusy}
-            className="w-full text-[13px] border border-border-control rounded-[7px] px-3 py-[7px] bg-bg-content text-text-primary"
+            className="input-glass w-full"
           >
             <option value="">System default</option>
             {devices.map((d) => (
@@ -129,10 +129,10 @@ export default function MicTest(props: StepProps) {
           className={
             'relative w-[88px] h-[88px] rounded-full grid place-items-center transition-all flex-shrink-0 mb-5 ' +
             (phase === 'recording'
-              ? 'bg-[#e85d4a] text-white shadow-[0_0_0_8px_rgba(232,93,74,0.16)]'
+              ? 'bg-danger text-white shadow-[0_0_0_8px_rgb(var(--danger-rgb)/0.18),0_0_28px_rgb(var(--danger-rgb)/0.45)]'
               : passed
                 ? 'bg-[var(--toggle-on-bg)] text-[var(--toggle-on-thumb)]'
-                : 'bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] hover:scale-[1.04] disabled:opacity-50')
+                : 'bg-text-primary text-text-on-primary hover:scale-[1.04] disabled:opacity-50')
           }
         >
           {passed ? (
@@ -153,7 +153,7 @@ export default function MicTest(props: StepProps) {
         <Waveform rms={rms} active={phase === 'recording'} />
 
         {(transcript || phase === 'done') && (
-          <div className="w-full max-w-[480px] font-serif text-[14px] leading-[1.55] text-text-primary py-3 px-4 rounded-[10px] bg-bg-row border border-border-hairline mt-6 text-center">
+          <div className="w-full max-w-[480px] text-[14px] leading-[1.55] text-text-primary py-3 px-4 glass !rounded-[14px] mt-6 text-center">
             {transcript || (
               <span className="text-text-quaternary italic">
                 (no speech detected — try again, a little louder)
@@ -163,7 +163,7 @@ export default function MicTest(props: StepProps) {
         )}
 
         {error && (
-          <div className="w-full max-w-[480px] text-[12px] text-[#e85d4a] py-2 px-3 rounded-[8px] bg-bg-row border border-border-hairline mt-4">
+          <div className="w-full max-w-[480px] text-[12px] text-danger py-2 px-3 rounded-[10px] bg-danger/10 border border-danger/30 mt-4">
             {error}
           </div>
         )}

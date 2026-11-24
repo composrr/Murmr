@@ -118,7 +118,7 @@ export default function PermissionStep({
                 type="button"
                 disabled={requesting}
                 onClick={handleRequest}
-                className="text-[13px] font-medium rounded-full px-4 py-[8px] bg-[#1f1f1c] text-[#fafaf9] disabled:opacity-50"
+                className="text-[13px] font-medium rounded-full px-4 py-[8px] bg-text-primary text-text-on-primary disabled:opacity-50"
               >
                 {requesting ? 'Asking macOS…' : 'Allow microphone…'}
               </button>
@@ -129,7 +129,7 @@ export default function PermissionStep({
                 openMacPrefPane(pane).catch(() => {});
               }}
               className="text-[13px] font-medium rounded-full px-4 py-[8px] text-text-primary"
-              style={{ border: '0.5px solid var(--border-control, rgba(0,0,0,0.18))' }}
+              style={{ border: '1px solid var(--border-control)' }}
             >
               Open System Settings
             </button>
@@ -139,8 +139,8 @@ export default function PermissionStep({
         <div
           className="rounded-lg p-4 text-[12px] text-text-tertiary leading-[1.6]"
           style={{
-            background: 'var(--bg-control, rgba(0,0,0,0.03))',
-            border: '0.5px solid var(--border-hairline, rgba(0,0,0,0.06))',
+            background: 'var(--bg-row)',
+            border: '1px solid var(--glass-border)',
           }}
         >
           {tips}
@@ -159,31 +159,31 @@ function StatusBanner({
 }) {
   const granted = status === 'granted' || status === 'not-applicable';
 
-  let dot = '#c9a227'; // amber default (waiting / not enabled)
+  let dot = 'rgb(var(--warn-rgb))'; // amber default (waiting / not enabled)
   let label = 'Checking…';
   let sub: string | null = null;
 
   if (status === null) {
-    dot = '#9d9485';
+    dot = 'var(--text-quaternary)';
     label = 'Checking…';
   } else if (granted) {
-    dot = '#3fae5a';
+    dot = 'rgb(var(--good-rgb))';
     label = 'Enabled';
     sub = appliesAfterRestart
       ? 'Detected — takes effect when Murmr restarts at the end of setup.'
       : null;
   } else if (status === 'not-determined') {
-    dot = '#c9a227';
+    dot = 'rgb(var(--warn-rgb))';
     label = 'Waiting for your approval…';
   } else if (status === 'denied') {
-    dot = '#e85d4a';
+    dot = 'var(--danger)';
     label = 'Not enabled yet';
   } else if (status === 'restricted') {
-    dot = '#e85d4a';
+    dot = 'var(--danger)';
     label = 'Blocked by your administrator';
     sub = 'A device-management profile is preventing this. Contact whoever manages this Mac.';
   } else {
-    dot = '#c9a227';
+    dot = 'rgb(var(--warn-rgb))';
     label = 'Not enabled yet';
   }
 

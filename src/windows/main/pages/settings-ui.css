@@ -1,0 +1,50 @@
+/* Consecutive settings rows join into one glass card.
+ * First row in a run gets the top edge, last row gets the bottom edge. */
+.s-row {
+  position: relative;
+  padding: 16px 20px;
+  background: var(--bg-row);
+  border-left: 1px solid var(--glass-border);
+  border-right: 1px solid var(--glass-border);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+.s-row + .s-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 1px;
+  background: var(--border-hairline);
+}
+.s-row:not(.s-row + .s-row) {
+  border-top: 1px solid var(--glass-border);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: var(--glass-highlight);
+}
+.s-row:not(:has(+ .s-row)) {
+  border-bottom: 1px solid var(--glass-border);
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+}
+
+/* Accent glow inside a card (used once per screen at most). */
+.card-glow {
+  pointer-events: none;
+  position: absolute;
+  top: -120px;
+  right: -60px;
+  width: 300px;
+  height: 220px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb) / 0.22);
+  filter: blur(60px);
+}
+
+/* Range sliders: thin track, light thumb. */
+input[type='range'].glass-range {
+  accent-color: var(--text-primary);
+  height: 4px;
+}

@@ -102,7 +102,7 @@ export default function AiCleanupSection({
             : 'Polish punctuation, grammar, and filler with Claude Haiku after the built-in rules. Falls back to the rule-based text if it is slow or fails. Skipped in literal mode.'
         }
       >
-        <Toggle on={settings.ai_cleanup} onChange={(v) => update({ ai_cleanup: v })} />
+        <Toggle accent on={settings.ai_cleanup} onChange={(v) => update({ ai_cleanup: v })} />
       </Row>
       <Row
         name="Anthropic API key"
@@ -121,7 +121,7 @@ export default function AiCleanupSection({
               placeholder="sk-ant-…"
               autoComplete="off"
               spellCheck={false}
-              className="text-[13px] border border-border-control rounded-[7px] px-3 py-[6px] bg-bg-content text-text-primary w-[200px]"
+              className="input-glass w-[200px] !h-[32px]"
             />
           )}
           {!hasKey && (
@@ -140,7 +140,7 @@ export default function AiCleanupSection({
         </div>
       </Row>
       {(test.kind === 'ok' || test.kind === 'error' || error) && (
-        <div className="text-[12px] text-text-tertiary pb-4 -mt-2">
+        <div className="text-[12px] text-text-tertiary pt-3 px-1">
           {error && <div>Keychain error: {error}</div>}
           {test.kind === 'ok' && (
             <div>
@@ -150,7 +150,7 @@ export default function AiCleanupSection({
           {test.kind === 'error' && <div>Test failed: {test.message}</div>}
         </div>
       )}
-      <p className="text-[11px] text-text-quaternary pb-2">
+      <p className="text-[11px] text-text-quaternary pt-2 px-1">
         When AI cleanup is on, the text of each dictation is sent to Anthropic. Audio never leaves
         your computer.
       </p>

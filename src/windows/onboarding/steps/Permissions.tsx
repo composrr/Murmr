@@ -49,7 +49,7 @@ function Item({
       <span
         className={
           'mt-[3px] w-[16px] h-[16px] rounded-full grid place-items-center flex-shrink-0 ' +
-          (warn ? 'bg-bg-control text-text-secondary' : 'bg-[#1f1f1c] text-[#fafaf9]')
+          (warn ? 'bg-bg-control text-text-secondary' : 'bg-text-primary text-text-on-primary')
         }
       >
         {warn ? (

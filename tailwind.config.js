@@ -12,12 +12,9 @@ export default {
           'system-ui',
           'sans-serif',
         ],
-        serif: [
-          'Source Serif 4',
-          'Source Serif Pro',
-          'Georgia',
-          'serif',
-        ],
+        // The redesign is Inter-only. `font-serif` is kept as an alias so
+        // any leftover class still renders in the new type.
+        serif: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'system-ui', 'sans-serif'],
       },
       colors: {
         'bg-window': 'var(--bg-window)',
@@ -36,12 +33,18 @@ export default {
         'hud-bg': 'var(--hud-bg)',
         'hud-text': 'var(--hud-text)',
         'hud-recording': 'var(--hud-recording)',
+        accent: 'rgb(var(--accent-rgb) / <alpha-value>)',
+        danger: 'rgb(var(--danger-rgb) / <alpha-value>)',
+        good: 'rgb(var(--good-rgb) / <alpha-value>)',
+        warn: 'rgb(var(--warn-rgb) / <alpha-value>)',
+        'border-strong': 'var(--border-strong)',
+        'bg-popover': 'var(--bg-popover)',
       },
       borderRadius: {
         window: '14px',
-        card: '12px',
-        row: '10px',
-        control: '7px',
+        card: '18px',
+        row: '12px',
+        control: '9px',
       },
       boxShadow: {
         window: 'var(--shadow-window)',

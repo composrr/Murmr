@@ -15,13 +15,11 @@ export default function LivePreviewText({ stable, tentative, finishing }: Props)
   if (!stable && !tentative) return null;
   return (
     <div
+      className="hud-panel"
       style={{
         width: 516,
         maxWidth: 'calc(100vw - 24px)',
-        background: '#1f1f1c',
-        border: '0.5px solid rgba(255,255,255,0.06)',
-        boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
-        borderRadius: 12,
+        borderRadius: 14,
         padding: '9px 14px',
         boxSizing: 'border-box',
       }}
@@ -41,9 +39,9 @@ export default function LivePreviewText({ stable, tentative, finishing }: Props)
         }}
       >
         <p style={{ margin: 0, wordBreak: 'break-word' }}>
-          {stable && <span style={{ color: '#d4d4cf' }}>{stable}</span>}
+          {stable && <span style={{ color: '#f4f4f5' }}>{stable}</span>}
           {stable && tentative ? ' ' : null}
-          {tentative && <span style={{ color: 'rgba(212,212,207,0.5)' }}>{tentative}</span>}
+          {tentative && <span style={{ color: 'rgba(244,244,245,0.5)' }}>{tentative}</span>}
         </p>
       </div>
     </div>

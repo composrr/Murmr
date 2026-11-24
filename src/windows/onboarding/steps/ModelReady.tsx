@@ -8,12 +8,12 @@ export default function ModelReady(props: StepProps) {
       title="Speech model"
       subtitle="Murmr ships with the model already on disk — no download, no internet, no API key."
     >
-      <div className="rounded-[12px] bg-bg-row border border-border-hairline p-5 max-w-[560px]">
+      <div className="glass !rounded-[16px] p-5 max-w-[560px]">
         <div className="flex items-center gap-3 mb-2">
-          <span className="w-[18px] h-[18px] rounded-full bg-[#1f1f1c] dark:bg-[#d4d4cf] grid place-items-center text-[#fafaf9] dark:text-[#1f1f1c] text-[10px] font-bold">
+          <span className="w-[18px] h-[18px] rounded-full bg-text-primary grid place-items-center text-text-on-primary text-[10px] font-bold">
             ✓
           </span>
-          <span className="font-serif text-[18px] text-text-primary">base.en</span>
+          <span className="text-[18px] text-text-primary">base.en</span>
           <span className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium">
             ready · 147 MB
           </span>
@@ -49,7 +49,7 @@ function Alt({ name, size, tradeoff }: { name: string; size: string; tradeoff: s
   return (
     <div className="rounded-[10px] border border-border-hairline p-4 opacity-70">
       <div className="flex items-baseline justify-between mb-1.5">
-        <span className="font-serif text-[16px] text-text-primary">{name}</span>
+        <span className="text-[16px] text-text-primary">{name}</span>
         <span className="text-[11px] text-text-quaternary tabular-nums">{size}</span>
       </div>
       <div className="text-[12px] text-text-tertiary leading-[1.5]">{tradeoff}</div>

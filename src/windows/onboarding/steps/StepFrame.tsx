@@ -26,13 +26,16 @@ export default function StepFrame({
 }: FrameProps) {
   const handlePrimary = onPrimary ?? next;
   return (
-    <div className="flex-1 flex flex-col px-12 pt-2 pb-8 min-h-0">
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <h1 className="font-serif text-[26px] tracking-[-0.4px] text-text-primary m-0 mb-2">
+    <div className="relative flex-1 flex flex-col px-12 pt-2 pb-8 min-h-0">
+      <div key={index} className="flex-1 min-h-0 overflow-hidden flex flex-col fade-up">
+        <div className="eyebrow mb-2">
+          Step {index + 1} of {total}
+        </div>
+        <h1 className="text-[30px] font-semibold tracking-[-1px] leading-[1.1] text-text-primary m-0 mb-2">
           {title}
         </h1>
         {subtitle && (
-          <p className="text-[13.5px] text-text-tertiary leading-[1.55] m-0 mb-5 max-w-[560px]">
+          <p className="text-[14px] text-text-secondary leading-[1.55] m-0 mb-5 max-w-[560px]">
             {subtitle}
           </p>
         )}

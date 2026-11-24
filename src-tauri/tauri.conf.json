@@ -22,9 +22,16 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
-        "transparent": false,
+        "transparent": true,
         "visible": false,
-        "center": true
+        "center": true,
+        "windowEffects": {
+          "effects": [
+            "mica",
+            "underWindowBackground"
+          ],
+          "state": "followsWindowActiveState"
+        }
       },
       {
         "label": "hud",

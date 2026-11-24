@@ -279,7 +279,7 @@ export default function HudApp() {
           command={view.command}
         />
       )}
-      {view.kind === 'thinking' && <Thinking label={view.command ? 'working on it' : undefined} />}
+      {view.kind === 'thinking' && <Thinking label={view.command ? 'Working on it' : undefined} />}
       {view.kind === 'command-notice' && <Notice message={view.message} />}
       {view.kind === 'result' && (
         <ResultPopup text={view.text} onDismiss={() => setView({ kind: 'hidden' })} />
@@ -310,18 +310,9 @@ export default function HudApp() {
 /// Command mode: transient message pill (no key, nothing heard, failed…).
 function Notice({ message }: { message: string }) {
   return (
-    <div
-      className="flex items-center gap-[10px] rounded-full"
-      style={{
-        background: 'var(--hud-bg, #1f1f1c)',
-        padding: '11px 22px',
-        border: '0.5px solid rgba(255,255,255,0.06)',
-        boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
-        maxWidth: 460,
-      }}
-    >
-      <span className="block w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#6f9bf2' }} />
-      <span style={{ color: 'rgba(212,212,207,0.85)', fontSize: 13 }}>{message}</span>
+    <div className="hud-pill gap-[10px]" style={{ maxWidth: 460 }}>
+      <span className="hud-dot hud-dot-cmd" />
+      <span className="truncate" style={{ color: '#e4e4e7' }}>{message}</span>
     </div>
   );
 }
@@ -329,17 +320,9 @@ function Notice({ message }: { message: string }) {
 /// Tiny transient pill shown when a recording contained no usable speech.
 function NoSpeech() {
   return (
-    <div
-      className="flex items-center gap-[10px] rounded-full"
-      style={{
-        background: 'var(--hud-bg, #1f1f1c)',
-        padding: '11px 22px',
-        border: '0.5px solid rgba(255,255,255,0.06)',
-        boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
-      }}
-    >
-      <span className="block w-2 h-2 rounded-full" style={{ background: '#c8a24a' }} />
-      <span style={{ color: 'rgba(212,212,207,0.85)', fontSize: 13 }}>Didn't catch that</span>
+    <div className="hud-pill gap-[10px]">
+      <span className="hud-dot hud-dot-warn" />
+      <span style={{ color: '#e4e4e7' }}>Didn't catch that</span>
     </div>
   );
 }

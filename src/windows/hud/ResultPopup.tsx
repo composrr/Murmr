@@ -17,25 +17,8 @@ interface Props {
 }
 
 const PILL_STYLE: React.CSSProperties = {
-  background: '#1f1f1c',
-  borderRadius: 14,
   padding: '14px 16px',
-  border: '0.5px solid rgba(255,255,255,0.06)',
-  boxShadow: '0 6px 28px rgba(0,0,0,0.22)',
   maxWidth: 480,
-};
-
-const BUTTON_STYLE: React.CSSProperties = {
-  background: '#3a3a35',
-  border: '0.5px solid rgba(255,255,255,0.08)',
-  color: '#d4d4cf',
-  fontSize: 12,
-  padding: '6px 12px',
-  borderRadius: 8,
-  fontWeight: 500,
-  whiteSpace: 'nowrap',
-  fontFamily: 'inherit',
-  cursor: 'pointer',
 };
 
 /** Most "Add to dictionary" chips shown at once. */
@@ -159,7 +142,7 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
 
   if (editable) {
     return (
-      <div className="flex flex-col gap-2" style={PILL_STYLE}>
+      <div className="hud-panel flex flex-col gap-2" style={PILL_STYLE}>
         <textarea
           ref={areaRef}
           value={draft}
@@ -176,10 +159,11 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
           rows={2}
           spellCheck={false}
           style={{
-            background: 'rgba(0,0,0,0.25)',
-            border: '0.5px solid rgba(255,255,255,0.12)',
-            borderRadius: 8,
-            color: '#e6e3dc',
+            background: 'rgba(0,0,0,0.3)',
+            border: '1px solid rgba(124,156,255,0.45)',
+            boxShadow: '0 0 0 3px rgba(124,156,255,0.12)',
+            borderRadius: 10,
+            color: '#f4f4f5',
             fontSize: 14,
             lineHeight: 1.4,
             padding: '8px 10px',
@@ -191,7 +175,7 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
         />
         {candidates.length > 0 && (
           <div className="flex items-center gap-[6px] flex-wrap" style={{ minHeight: 24 }}>
-            <span style={{ color: '#8f8d86', fontSize: 11, marginRight: 2 }}>Add to dictionary:</span>
+            <span style={{ color: '#8e8e96', fontSize: 11, marginRight: 2 }}>Add to dictionary:</span>
             {candidates.map((c) => {
               const on = picked.has(candidateKey(c));
               return (
@@ -204,16 +188,14 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
                       : `Always replace "${c.trigger}" with "${c.expansion}"`
                   }
                   aria-pressed={on}
+                  className="hud-btn"
                   style={{
-                    ...BUTTON_STYLE,
                     fontSize: 11,
-                    padding: '3px 9px',
-                    borderRadius: 999,
-                    background: on ? '#4a5a3f' : 'transparent',
-                    color: on ? '#eaf0e2' : '#c8c6bf',
-                    border: on
-                      ? '0.5px solid rgba(234,240,226,0.25)'
-                      : '0.5px solid rgba(255,255,255,0.16)',
+                    height: 24,
+                    padding: '0 9px',
+                    background: on ? 'rgba(124,156,255,0.18)' : 'transparent',
+                    color: on ? '#7c9cff' : '#d4d4d8',
+                    borderColor: on ? 'rgba(124,156,255,0.45)' : 'rgba(255,255,255,0.16)',
                     maxWidth: 220,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -227,16 +209,13 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
           </div>
         )}
         <div className="flex items-center justify-end gap-2">
-          <button onClick={cancelEdit} style={{ ...BUTTON_STYLE, background: 'transparent' }}>
+          <button onClick={cancelEdit} className="hud-btn hud-btn-ghost">
             Cancel
           </button>
-          <button onClick={copy} style={BUTTON_STYLE}>
+          <button onClick={copy} className="hud-btn">
             Copy
           </button>
-          <button
-            onClick={insert}
-            style={{ ...BUTTON_STYLE, background: '#4a5a3f', color: '#eaf0e2' }}
-          >
+          <button onClick={insert} className="hud-btn hud-btn-primary">
             Insert
           </button>
         </div>
@@ -245,20 +224,18 @@ export default function ResultPopup({ text, editable, onDismiss }: Props) {
   }
 
   return (
-    <div className="flex items-center gap-3" style={PILL_STYLE}>
+    <div className="hud-panel flex items-center gap-3" style={PILL_STYLE}>
       <span
-        className="font-serif"
         style={{
-          color: '#d4d4cf',
+          color: '#f4f4f5',
           fontSize: 14,
           lineHeight: 1.4,
           flex: 1,
-          fontStyle: 'italic',
         }}
       >
         {text}
       </span>
-      <button onClick={copy} style={BUTTON_STYLE}>
+      <button onClick={copy} className="hud-btn">
         Copy
       </button>
     </div>

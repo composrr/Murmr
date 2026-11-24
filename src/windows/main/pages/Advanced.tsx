@@ -125,7 +125,7 @@ export default function Advanced() {
 
   if (!settings || !paths) {
     return (
-      <div className="max-w-[640px]">
+      <div className="max-w-[720px]">
         <SettingsHeader title="Advanced" />
         <p className="text-[13px] text-text-quaternary">Loading…</p>
       </div>
@@ -133,7 +133,7 @@ export default function Advanced() {
   }
 
   return (
-    <div className="max-w-[640px]">
+    <div className="max-w-[720px]">
       <SettingsHeader
         title="Advanced"
         subtitle="Speech model, injection mode, log level."
@@ -185,7 +185,7 @@ export default function Advanced() {
           ? 'Recommended for your GPU.'
           : 'Slow without a GPU: around 10 seconds per dictation even on a fast CPU (Base takes under 1 second).';
         return (
-          <div key={m.file} className="py-5 border-b border-border-hairline">
+          <div key={m.file} className="s-row">
             <div className="flex items-center justify-between gap-6">
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] text-text-primary font-medium tracking-[-0.1px] flex items-center gap-2">
@@ -233,7 +233,7 @@ export default function Advanced() {
               <div className="mt-3">
                 <div className="h-[6px] rounded-full bg-bg-control overflow-hidden">
                   <div
-                    className="h-full bg-[var(--toggle-on-bg)] transition-[width] duration-200"
+                    className="h-full bg-accent transition-[width] duration-200"
                     style={{ width: `${pct}%` }}
                   />
                 </div>

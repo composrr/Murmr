@@ -60,21 +60,25 @@ export default function ReleaseNotes({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-6"
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[6px] flex items-center justify-center p-6"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-[680px] max-h-[80vh] bg-bg-content border border-border-hairline rounded-[16px] shadow-2xl flex flex-col overflow-hidden"
+        className="relative w-full max-w-[680px] max-h-[80vh] border border-border-control rounded-[20px] flex flex-col overflow-hidden fade-up"
+        style={{ background: 'var(--bg-popover)', boxShadow: 'var(--glass-highlight), 0 30px 80px rgba(0,0,0,0.5)' }}
+        role="dialog"
+        aria-modal="true"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border-hairline flex-shrink-0">
-          <h2 className="font-serif text-[22px] tracking-[-0.3px] text-text-primary m-0">
+          <h2 className="text-[20px] font-semibold tracking-[-0.5px] text-text-primary m-0">
             What's new
           </h2>
           <button
             onClick={onClose}
-            className="text-text-tertiary hover:text-text-primary text-[13px] px-2 py-1 rounded"
+            className="w-[30px] h-[30px] grid place-items-center rounded-full text-text-tertiary hover:text-text-primary hover:bg-bg-control text-[13px]"
             title="Close (Esc)"
+            aria-label="Close"
           >
             ✕
           </button>
@@ -87,7 +91,7 @@ export default function ReleaseNotes({ onClose }: { onClose: () => void }) {
             </div>
           )}
           {error && (
-            <div className="text-[#c14a2b] dark:text-[#e87a5e] text-[13px] py-3">
+            <div className="text-danger text-[13px] py-3">
               Couldn't load CHANGELOG.md ({error}). Try again later — or view on{' '}
               <a
                 href="https://github.com/composrr/Murmr/releases"
@@ -206,14 +210,14 @@ function ReleaseSection({ chunk }: { chunk: string }) {
   return (
     <section
       className={[
-        'mb-5 rounded-[12px] border p-5',
+        'mb-4 rounded-[16px] border p-5',
         isUnreleased
-          ? 'border-dashed border-border-hairline bg-transparent'
+          ? 'border-dashed border-border-control bg-transparent'
           : 'border-border-hairline bg-bg-row',
       ].join(' ')}
     >
       <div className="flex items-baseline justify-between gap-3 mb-1">
-        <h3 className="font-serif text-[18px] tracking-[-0.2px] text-text-primary m-0">
+        <h3 className="text-[16px] font-semibold tracking-[-0.3px] text-text-primary m-0">
           {title}
         </h3>
         {date && (
@@ -259,11 +263,11 @@ function ReleaseSection({ chunk }: { chunk: string }) {
 function tagColor(heading: string): string {
   switch (heading.toLowerCase()) {
     case 'new':
-      return 'bg-[#e8f1e6] text-[#4a7f3f] dark:bg-[#28341f] dark:text-[#93c98a]';
+      return 'bg-accent/15 text-accent';
     case 'improved':
-      return 'bg-[#e6eef5] text-[#1f5c8c] dark:bg-[#1c2c3b] dark:text-[#7eb1da]';
+      return 'bg-bg-selected text-text-primary';
     case 'fixed':
-      return 'bg-[#fbe9e3] text-[#c14a2b] dark:bg-[#3a1f15] dark:text-[#e87a5e]';
+      return 'bg-bg-control text-text-secondary';
     default:
       return 'bg-bg-control text-text-secondary';
   }

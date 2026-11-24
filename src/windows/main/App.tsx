@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ping } from '../../lib/ipc';
 import { useTheme } from '../../hooks/useTheme';
 import { UpdaterProvider, useSharedUpdater } from '../../hooks/UpdaterContext';
@@ -119,7 +119,10 @@ function AppBody() {
         )}
         <div className="flex-1 min-h-0 flex">
           <Sidebar version={version} />
-          <main className="flex-1 overflow-auto bg-bg-content px-10 py-9">
+          <main className="relative flex-1 min-w-0 overflow-auto">
+            <ScrollReset />
+            <div className="page-glow" aria-hidden="true" />
+            <div className="relative z-[1] px-10 pt-9 pb-12 max-w-[1080px] mx-auto">
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/insights" element={<Insights />} />
@@ -132,9 +135,19 @@ function AppBody() {
               <Route path="/advanced" element={<Advanced />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </div>
           </main>
         </div>
       </div>
     </HashRouter>
   );
+}
+
+/// Each page starts at the top (the scroll container is shared).
+function ScrollReset() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.querySelector('main')?.scrollTo({ top: 0 });
+  }, [pathname]);
+  return null;
 }

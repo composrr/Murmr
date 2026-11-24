@@ -170,10 +170,10 @@ export default function Practice(props: StepProps) {
           className={
             'relative w-[88px] h-[88px] rounded-full grid place-items-center transition-all flex-shrink-0 mb-5 ' +
             (recording
-              ? 'bg-[#e85d4a] text-white shadow-[0_0_0_8px_rgba(232,93,74,0.16)]'
+              ? 'bg-danger text-white shadow-[0_0_0_8px_rgb(var(--danger-rgb)/0.18),0_0_28px_rgb(var(--danger-rgb)/0.45)]'
               : hasSucceeded
                 ? 'bg-[var(--toggle-on-bg)] text-[var(--toggle-on-thumb)] hover:scale-[1.04]'
-                : 'bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] hover:scale-[1.04] disabled:opacity-50')
+                : 'bg-text-primary text-text-on-primary hover:scale-[1.04] disabled:opacity-50')
           }
         >
           {hasSucceeded && !recording && !transcribing ? (
@@ -194,14 +194,14 @@ export default function Practice(props: StepProps) {
         <Waveform rms={rms} active={recording} />
 
         {text && (
-          <div className="w-full max-w-[520px] mt-6 rounded-[12px] border border-border-hairline bg-bg-row p-5 font-serif text-[15px] leading-[1.55] text-text-primary whitespace-pre-line text-center">
+          <div className="w-full max-w-[520px] mt-6 glass !rounded-[16px] p-5 text-[15px] leading-[1.55] text-text-primary whitespace-pre-line text-center">
             {text}
           </div>
         )}
 
         {hasSucceeded && (
-          <div className="bg-bg-control border border-border-hairline rounded-[10px] px-4 py-3 mt-4 flex items-center gap-2.5 max-w-[520px]">
-            <span className="w-[16px] h-[16px] rounded-full bg-[#1f1f1c] dark:bg-[#d4d4cf] grid place-items-center text-[#fafaf9] dark:text-[#1f1f1c] text-[9px] font-bold flex-shrink-0">
+          <div className="glass !rounded-[14px] px-4 py-3 mt-4 flex items-center gap-2.5 max-w-[520px]">
+            <span className="w-[16px] h-[16px] rounded-full bg-text-primary grid place-items-center text-text-on-primary text-[9px] font-bold flex-shrink-0">
               ✓
             </span>
             <span className="text-[12px] text-text-primary">

@@ -18,6 +18,7 @@ import {
   type TranscriptionResult,
 } from '../../../lib/ipc';
 import type { Theme } from '../../../lib/theme';
+import { Row, SectionHeader, Segmented, SecondaryButton, SettingsHeader, Toggle } from './settings-ui';
 
 const THEMES: Theme[] = ['light', 'dark', 'auto'];
 const RECORD_SECONDS = 4;
@@ -32,12 +33,12 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_DOT: Record<string, string> = {
-  idle: 'bg-text-quaternary',
-  recording: 'bg-[#e85d4a]',
-  transcribing: 'bg-text-secondary',
-  injected: 'bg-text-secondary',
+  idle: 'bg-good',
+  recording: 'bg-danger',
+  transcribing: 'bg-accent',
+  injected: 'bg-good',
   cancelled: 'bg-text-quaternary',
-  error: 'bg-[#e85d4a]',
+  error: 'bg-danger',
 };
 
 type TestState =
@@ -126,13 +127,11 @@ export default function General() {
   const isBusy = test.kind === 'recording' || test.kind === 'transcribing';
 
   return (
-    <div className="max-w-[640px]">
-      <h1 className="font-serif text-[30px] tracking-[-0.4px] text-text-primary mb-1">
-        General
-      </h1>
-      <p className="text-[13px] text-text-quaternary mb-7">
-        {user ? `${user} · ` : ''}Murmr v{pong?.version ?? '0.1.0'}
-      </p>
+    <div className="max-w-[720px]">
+      <SettingsHeader
+        title="General"
+        subtitle={`${user ? `${user} · ` : ''}Murmr v${pong?.version ?? '0.1.0'}`}
+      />
 
       {/* ---------- Settings rows ---------- */}
       <Row name="Display name" hint='Used in the "Welcome back, …" greeting on Home'>
@@ -142,45 +141,28 @@ export default function General() {
           onChange={(e) => updateName(e.target.value)}
           placeholder="Jon"
           maxLength={32}
-          className="text-[13px] border border-border-control rounded-[7px] px-3 py-[6px] bg-bg-content text-text-primary text-right w-[180px]"
+          className="input-glass text-right w-[180px] !h-[34px]"
         />
       </Row>
 
       <Row name="Microphone" hint="Used to capture your voice">
-        <select
-          disabled
-          className="text-[13px] text-text-tertiary border border-border-control rounded-[7px] px-3 py-[6px] bg-bg-content"
-        >
+        <select disabled className="input-glass !h-[34px] !text-text-tertiary opacity-70">
           <option>{test.kind === 'done' ? test.result.capture_device : 'System default'}</option>
         </select>
       </Row>
 
       <Row name="Speech model" hint="Larger is more accurate but slower">
-        <select
-          disabled
-          className="text-[13px] text-text-tertiary border border-border-control rounded-[7px] px-3 py-[6px] bg-bg-content"
-        >
+        <select disabled className="input-glass !h-[34px] !text-text-tertiary opacity-70">
           <option>base.en (recommended)</option>
         </select>
       </Row>
 
       <Row name="Appearance" hint="Light, dark, or follow system">
-        <div className="flex gap-[2px] bg-bg-control rounded-[7px] p-[2px]">
-          {THEMES.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTheme(t)}
-              className={
-                'text-[12px] px-[11px] py-[4px] rounded-[5px] capitalize transition-colors ' +
-                (theme === t
-                  ? 'bg-bg-content text-text-primary font-medium shadow-[0_1px_2px_rgba(0,0,0,0.04)]'
-                  : 'bg-transparent text-text-tertiary hover:text-text-secondary')
-              }
-            >
-              {t}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={theme}
+          onChange={setTheme}
+          options={THEMES.map((t) => ({ value: t, label: t[0].toUpperCase() + t.slice(1) }))}
+        />
       </Row>
 
       <Row name="Launch at login" hint="Murmr starts in the tray whenever you sign in">
@@ -192,14 +174,13 @@ export default function General() {
       </Row>
 
       <Row name="Check for updates" hint={updaterHint(updater.state, pong?.version ?? '0.1.0')}>
-        <button
+        <SecondaryButton
           onClick={() =>
             updater.state.kind === 'available'
               ? updater.installNow()
               : updater.checkNow()
           }
           disabled={updater.state.kind === 'checking' || updater.state.kind === 'downloading'}
-          className="text-[12px] px-[14px] py-[6px] rounded-[8px] border border-border-control bg-bg-content text-text-primary font-medium hover:bg-bg-control disabled:opacity-50"
         >
           {updater.state.kind === 'checking'
             ? 'Checking…'
@@ -208,27 +189,22 @@ export default function General() {
               : updater.state.kind === 'available'
                 ? 'Install now'
                 : 'Check now'}
-        </button>
+        </SecondaryButton>
       </Row>
 
       <Row name="Release notes" hint="See what's new in each Murmr version">
-        <button
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent('murmr:open-release-notes'))
-          }
-          className="text-[12px] px-[14px] py-[6px] rounded-[8px] border border-border-control bg-bg-content text-text-primary font-medium hover:bg-bg-control"
+        <SecondaryButton
+          onClick={() => window.dispatchEvent(new CustomEvent('murmr:open-release-notes'))}
         >
           What's new
-        </button>
+        </SecondaryButton>
       </Row>
 
       {/* ---------- Diagnostic dictation status (Phase 5 scaffolding; trims away later) ---------- */}
-      <div className="mt-10 pt-7 border-t border-border-hairline">
-        <h2 className="font-serif text-[22px] text-text-primary mb-4">
-          Status & diagnostics
-        </h2>
+      <div>
+        <SectionHeader>Status &amp; diagnostics</SectionHeader>
 
-        <div className="bg-bg-row border border-border-hairline rounded-card px-5 py-4 mb-4">
+        <div className="glass px-5 py-4 mb-3">
           <div className="flex items-center gap-3">
             <div
               className={`w-2 h-2 rounded-full ${STATUS_DOT[status.kind] ?? 'bg-text-quaternary'} ${
@@ -243,33 +219,27 @@ export default function General() {
           </div>
 
           {status.kind === 'error' && (
-            <div className="text-[12px] text-[#e85d4a] mt-3 px-3 py-2 rounded-[8px] bg-bg-content border border-border-hairline">
+            <div className="text-[12px] text-danger mt-3 px-3 py-2 rounded-[10px] bg-danger/10 border border-danger/30">
               {status.message}
             </div>
           )}
 
           {lastInjected && (
             <>
-              <div className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium mt-4 mb-2">
-                Most recent
-              </div>
-              <p className="font-serif text-[15px] text-text-primary leading-[1.55] m-0">
+              <div className="eyebrow mt-4 mb-2">Most recent</div>
+              <p className="text-[14px] text-text-primary leading-[1.55] m-0">
                 {lastInjected}
               </p>
             </>
           )}
         </div>
 
-        <div className="bg-bg-row border border-border-hairline rounded-card px-5 py-4">
+        <div className="glass px-5 py-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] uppercase tracking-[0.6px] text-text-quaternary font-medium">
+            <div className="text-[14px] font-medium text-text-primary">
               Run a {RECORD_SECONDS}-second mic test
             </div>
-            <button
-              onClick={startTest}
-              disabled={isBusy}
-              className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[12px] font-medium rounded-full px-4 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button onClick={startTest} disabled={isBusy} className="btn-primary !h-[30px] !text-[12px]">
               {test.kind === 'recording'
                 ? `Recording… ${test.secondsRemaining}s`
                 : test.kind === 'transcribing'
@@ -283,7 +253,7 @@ export default function General() {
           </p>
           {test.kind === 'done' && (
             <>
-              <p className="font-serif text-[14px] text-text-primary leading-[1.55] mt-3 px-3 py-3 rounded-row bg-bg-content border border-border-hairline">
+              <p className="text-[14px] text-text-primary leading-[1.55] mt-3 px-3 py-3 rounded-[12px] bg-bg-content border border-border-hairline">
                 {test.result.text || (
                   <span className="text-text-quaternary italic">(no speech detected)</span>
                 )}
@@ -301,7 +271,7 @@ export default function General() {
             </>
           )}
           {test.kind === 'error' && (
-            <p className="text-[12px] text-[#e85d4a] mt-3 px-3 py-2 rounded-[8px] bg-bg-content border border-border-hairline">
+            <p className="text-[12px] text-danger mt-3 px-3 py-2 rounded-[10px] bg-danger/10 border border-danger/30">
               {test.message}
             </p>
           )}
@@ -347,45 +317,4 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function Row({ name, hint, children }: { name: string; hint: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-6 py-5 border-b border-border-hairline">
-      <div className="flex-1">
-        <div className="text-[14px] text-text-primary font-medium tracking-[-0.1px]">{name}</div>
-        <div className="text-[12px] text-text-tertiary tracking-[-0.1px]">{hint}</div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Toggle({
-  on,
-  onChange,
-  disabled,
-}: {
-  on: boolean;
-  onChange?: (v: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => !disabled && onChange?.(!on)}
-      disabled={disabled}
-      className={
-        `w-[38px] h-[22px] rounded-full relative transition-colors ${
-          on ? 'bg-[var(--toggle-on-bg)]' : 'bg-[var(--toggle-off-bg)]'
-        } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`
-      }
-    >
-      <span
-        className={`absolute top-[2px] w-[18px] h-[18px] rounded-full transition-all ${
-          on ? 'right-[2px] bg-[var(--toggle-on-thumb)]' : 'left-[2px] bg-white'
-        }`}
-      />
-    </button>
-  );
 }

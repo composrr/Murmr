@@ -52,7 +52,7 @@ export default function Preferences() {
 
   if (!settings) {
     return (
-      <div className="max-w-[640px]">
+      <div className="max-w-[720px]">
         <SettingsHeader title="Preferences" />
         <p className="text-[13px] text-text-quaternary">Loading…</p>
       </div>
@@ -60,7 +60,7 @@ export default function Preferences() {
   }
 
   return (
-    <div className="max-w-[640px]">
+    <div className="max-w-[720px]">
       <SettingsHeader
         title="Preferences"
         subtitle="HUD, sounds, post-processing, retention."
@@ -110,7 +110,7 @@ export default function Preferences() {
             step={0.05}
             value={settings.sound_volume ?? 0.7}
             onChange={(e) => update({ sound_volume: parseFloat(e.target.value) })}
-            className="flex-1 accent-[#1f1f1c] dark:accent-[#d4d4cf]"
+            className="flex-1 glass-range"
           />
           <span className="text-[12px] text-text-tertiary tabular-nums w-[44px] text-right">
             {Math.round((settings.sound_volume ?? 0.7) * 100)}%

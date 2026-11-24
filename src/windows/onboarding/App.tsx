@@ -87,6 +87,7 @@ export default function App() {
 
   return (
     <div className="wizard-shell text-text-primary">
+      <div className="wizard-glow" aria-hidden="true" />
       <div className="wizard-titlebar" data-tauri-drag-region>
         <button
           type="button"
@@ -101,7 +102,7 @@ export default function App() {
           </svg>
         </button>
       </div>
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="relative flex-1 min-h-0 flex flex-col">
         <Step
           index={index}
           total={STEPS.length}
@@ -116,16 +117,21 @@ export default function App() {
 
 export function ProgressDots({ index, total }: { index: number; total: number }) {
   return (
-    <div className="flex items-center justify-center gap-[6px]">
+    <div className="flex items-center justify-center gap-[6px]" aria-label={`Step ${index + 1} of ${total}`}>
       {Array.from({ length: total }).map((_, i) => (
         <span
           key={i}
-          className={
-            'w-[6px] h-[6px] rounded-full transition-colors ' +
-            (i === index
-              ? 'bg-text-primary'
-              : 'bg-[var(--toggle-off-bg)]')
-          }
+          className="h-[4px] rounded-full transition-all duration-300"
+          style={{
+            width: i === index ? 28 : 14,
+            background:
+              i === index
+                ? 'var(--accent)'
+                : i < index
+                  ? 'var(--text-secondary)'
+                  : 'var(--border-control)',
+            boxShadow: i === index ? '0 0 10px rgb(var(--accent-rgb) / 0.6)' : undefined,
+          }}
         />
       ))}
     </div>
@@ -145,7 +151,7 @@ export function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="bg-[#1f1f1c] text-[#fafaf9] dark:bg-[#d4d4cf] dark:text-[#1f1f1c] text-[14px] font-medium rounded-full px-[28px] py-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
+      className="btn-primary !h-[40px] !px-[22px]"
     >
       {children}
     </button>
@@ -165,7 +171,7 @@ export function SecondaryButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="text-[14px] text-text-tertiary hover:text-text-primary px-[12px] py-[7px] disabled:opacity-50"
+      className="btn-ghost !h-[40px] !px-[18px] !bg-transparent"
     >
       {children}
     </button>

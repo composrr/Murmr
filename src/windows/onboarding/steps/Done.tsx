@@ -32,24 +32,24 @@ export default function Done({ index, total, finish }: StepProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center px-12 pt-2 pb-8 min-h-0 overflow-y-auto">
-      <div className="w-[64px] h-[64px] rounded-[14px] bg-[#1f1f1c] grid place-items-center mb-4">
+    <div className="flex-1 flex flex-col items-center px-12 pt-6 pb-8 min-h-0 overflow-y-auto">
+      <div className="w-[64px] h-[64px] rounded-[18px] grid place-items-center onb-icon mb-4">
         <svg viewBox="0 0 48 48" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
           <g transform="translate(24, 24)">
-            <rect x="-8" y="-17" width="16" height="22" rx="8" fill="#fafaf9" />
+            <rect x="-8" y="-17" width="16" height="22" rx="8" fill="var(--text-primary)" />
             <path
               d="M -13 4 Q -13 17 0 17 Q 13 17 13 4"
               fill="none"
-              stroke="#fafaf9"
+              stroke="var(--text-primary)"
               strokeWidth="3"
               strokeLinecap="round"
             />
-            <line x1="0" y1="17" x2="0" y2="24" stroke="#fafaf9" strokeWidth="3" strokeLinecap="round" />
+            <line x1="0" y1="17" x2="0" y2="24" stroke="var(--text-primary)" strokeWidth="3" strokeLinecap="round" />
           </g>
         </svg>
       </div>
 
-      <h1 className="font-serif text-[32px] tracking-[-0.5px] text-text-primary m-0 mb-1.5 text-center">
+      <h1 className="text-[32px] font-semibold tracking-[-0.9px] text-text-primary m-0 mb-1.5 text-center">
         You're all set
       </h1>
       <p className="text-[13.5px] text-text-tertiary leading-[1.6] text-center max-w-[460px] m-0 mb-7">
@@ -103,7 +103,7 @@ export default function Done({ index, total, finish }: StepProps) {
 
 function Reminder({ chord, label }: { chord: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-[10px] bg-bg-row border border-border-hairline px-4 py-2.5">
+    <div className="flex items-center gap-3 glass !rounded-[14px] px-4 py-2.5">
       <div className="flex-shrink-0 w-[160px]">{chord}</div>
       <div className="text-[12.5px] text-text-secondary leading-[1.5]">{label}</div>
     </div>

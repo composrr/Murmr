@@ -204,7 +204,7 @@ export default function HotkeyCapture({
   }, [capturing]);
 
   return (
-    <div className="flex flex-col items-end gap-1 w-[260px]">
+    <div className="flex flex-col items-end gap-1 w-[260px] max-w-full">
       <button
         ref={buttonRef}
         type="button"
@@ -219,10 +219,10 @@ export default function HotkeyCapture({
           setTimeout(() => setCapturing(false), 100);
         }}
         className={[
-          'w-full rounded-[8px] border px-3 py-[6px] text-[12px] font-medium transition-colors',
+          'w-full rounded-[10px] border px-3 h-[34px] text-[12px] font-medium transition-colors',
           capturing
-            ? 'border-[#7a7a72] bg-bg-row text-text-primary animate-pulse'
-            : 'border-border-control bg-bg-control text-text-primary hover:border-[#7a7a72]',
+            ? 'border-accent/60 bg-accent/10 text-text-primary animate-pulse shadow-[0_0_0_3px_rgb(var(--accent-rgb)/0.15)]'
+            : 'border-border-control bg-bg-control text-text-primary hover:border-border-strong',
           disabled && 'opacity-50 cursor-not-allowed',
         ]
           .filter(Boolean)
@@ -231,7 +231,7 @@ export default function HotkeyCapture({
         {capturing ? 'Press any key or combo…  (Esc to cancel)' : displayName(value)}
       </button>
       {error && (
-        <span className="text-[11px] text-[#c14a2b] dark:text-[#e87a5e] leading-tight">{error}</span>
+        <span className="text-[11px] text-danger leading-tight">{error}</span>
       )}
     </div>
   );
