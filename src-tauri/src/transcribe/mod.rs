@@ -22,8 +22,8 @@ use parking_lot::Mutex;
 use regex::Regex;
 use whisper_rs::{
     whisper_rs_sys::{ggml_log_level, ggml_log_set, whisper_log_set, whisper_print_system_info},
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadContext,
-    WhisperVadContextParams, WhisperVadParams,
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+    WhisperVadContext, WhisperVadContextParams, WhisperVadParams,
 };
 
 use crate::perf_log;
@@ -214,6 +214,13 @@ pub struct Transcriber {
     /// missing, failed to load, or VAD is switched off — transcription then
     /// runs on the full audio, exactly as before VAD existed.
     vad: Option<Mutex<WhisperVadContext>>,
+    /// One decode state (KV cache + compute buffers, ~300 MB of VRAM for
+    /// turbo) kept between dictations. Creating it fresh every time meant a
+    /// big GPU allocation per dictation; when a game or 3D app had filled the
+    /// VRAM, ggml aborted the whole process mid-allocation. Allocated once
+    /// (normally during GPU warm-up) and reused; a concurrent decode simply
+    /// makes a temporary one.
+    spare_state: Mutex<Option<WhisperState>>,
 }
 
 impl Transcriber {
@@ -257,7 +264,7 @@ impl Transcriber {
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| model_path.to_string());
-        Ok(Self { ctx, backend, model_name, vad })
+        Ok(Self { ctx, backend, model_name, vad, spare_state: Mutex::new(None) })
     }
 
     pub fn backend(&self) -> &BackendInfo {
@@ -399,10 +406,14 @@ impl Transcriber {
         // the marker survives and the next launch falls back to CPU.
         let _gpu_guard = self.backend.is_gpu().then(gpu::InflightGuard::begin);
 
-        let mut state = self
-            .ctx
-            .create_state()
-            .map_err(|e| format!("failed to create Whisper state: {e}"))?;
+        let reused = self.spare_state.lock().take();
+        let mut state = match reused {
+            Some(s) => s,
+            None => self
+                .ctx
+                .create_state()
+                .map_err(|e| format!("failed to create Whisper state: {e}"))?,
+        };
         let t_state_ready = Instant::now();
 
         // Beam search explores multiple hypotheses per step — slower but more
@@ -436,7 +447,14 @@ impl Transcriber {
             text.push_str(&segment.to_str_lossy().map_err(|e| format!("segment text: {e}"))?);
         }
         let t_collect_done = Instant::now();
-        drop(state);
+        // Keep it for the next dictation (a failed decode returned early above
+        // and dropped its state, so only healthy states are reused).
+        {
+            let mut spare = self.spare_state.lock();
+            if spare.is_none() {
+                *spare = Some(state);
+            }
+        }
 
         // Remove Whisper's non-speech annotations (`[BLANK_AUDIO]`, etc.)
         // before anything else sees the text — including a mid-sentence pause

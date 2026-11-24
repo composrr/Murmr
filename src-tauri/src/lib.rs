@@ -868,6 +868,25 @@ fn bump_process_priority() {
 #[cfg(not(target_os = "windows"))]
 fn bump_process_priority() {}
 
+/// Ask Windows to reopen Murmr if it ever crashes or hangs (Windows only does
+/// this for processes that ran at least 60 s, so a startup crash can't loop).
+/// Without it, a crash leaves the user with no dictation until they notice.
+#[cfg(target_os = "windows")]
+fn register_restart_after_crash() {
+    use windows_sys::Win32::System::Recovery::{
+        RegisterApplicationRestart, RESTART_NO_PATCH, RESTART_NO_REBOOT,
+    };
+    // Restart after a crash or hang; not after Windows updates or reboots
+    // (autostart already covers those).
+    let hr = unsafe {
+        RegisterApplicationRestart(std::ptr::null(), RESTART_NO_PATCH | RESTART_NO_REBOOT)
+    };
+    perf_log::append(&format!("[startup] restart-after-crash registered (hr={hr:#x})"));
+}
+
+#[cfg(not(target_os = "windows"))]
+fn register_restart_after_crash() {}
+
 /// Resolve the user's app-data directory (where settings.json + the SQLite
 /// DB live) **without** needing an `AppHandle`. We need this because we
 /// open both BEFORE the Tauri builder runs — anything else races with the
@@ -1156,6 +1175,7 @@ pub fn run() {
     let app_data_dir = resolve_app_data_dir();
     perf_log::init(app_data_dir.clone());
     perf_log::append("[startup] Murmr launching");
+    register_restart_after_crash();
     perf_log::append(&format!("[startup] app_data_dir = {:?}", app_data_dir));
     perf_log::append(&format!(
         "[startup] version={} target_os={}",

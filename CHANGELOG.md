@@ -14,6 +14,16 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+### Fixed
+
+- **No more crashes when a game or 3D app is using the graphics card.** Murmr
+  used to grab a fresh ~300 MB of graphics memory for every dictation; with
+  the card nearly full, that request could take Murmr down. It now sets the
+  memory aside once and reuses it — which also makes each dictation a little
+  faster.
+- **Murmr comes back by itself after a crash** (Windows), instead of
+  silently disappearing until you notice.
+
 ---
 
 ## v0.1.76 — Back on the graphics card
