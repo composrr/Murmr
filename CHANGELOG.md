@@ -14,6 +14,10 @@ grouped by `New / Improved / Fixed`.
 
 _Anything currently in `main` that hasn't been tagged yet lands here._
 
+---
+
+## v0.1.77 — No more crashes with a busy graphics card
+
 ### Fixed
 
 - **No more crashes when a game or 3D app is using the graphics card.** Murmr
