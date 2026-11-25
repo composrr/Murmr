@@ -16,6 +16,19 @@ _Anything currently in `main` that hasn't been tagged yet lands here._
 
 ---
 
+## v0.1.78 — A whole new look
+
+### New
+
+- **Liquid glass redesign.** A darker, glassy look across the main window,
+  the dictation pill and setup, with one ice-blue accent colour.
+- **Insights page rebuilt.** A big speed number with a weekly chart, a streak
+  calendar, when and where you dictate, records, top words and filler words.
+- **Home and Dictionary refresh.** Quick-glance tiles on Home, and a
+  suggestion card plus an on/off switch per word in the Dictionary.
+
+---
+
 ## v0.1.77 — No more crashes with a busy graphics card
 
 ### Fixed

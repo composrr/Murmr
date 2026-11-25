@@ -2764,7 +2764,7 @@ dependencies = [
 
 [[package]]
 name = "murmr"
-version = "0.1.77"
+version = "0.1.78"
 dependencies = [
  "arboard",
  "core-foundation 0.10.1",
