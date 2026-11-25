@@ -200,6 +200,11 @@ jobs:
             unset APPLE_API_KEY APPLE_API_ISSUER
           fi
           unset APPLE_API_KEY_P8
+          # Self-hosted Mac: sign from the login keychain. Tauri tries to
+          # import APPLE_CERTIFICATE whenever it is set, even when empty.
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD
+          fi
           if [ "${{ matrix.os }}" = "macos-latest" ]; then
             npm run tauri build -- --target ${{ matrix.target }}
           else
